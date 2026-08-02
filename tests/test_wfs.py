@@ -3,6 +3,8 @@ import textwrap
 
 import pytest
 
+from sota_wfs.loaders import SOTA_MARKER_COLOR
+
 FIXTURE_CSV = textwrap.dedent(
     """\
     SOTA Summits List (Date=01/08/2026)
@@ -73,13 +75,15 @@ def test_caltopo_getfeature_shape(client):
         "BonusPoints": 3,
         "Activations": "1",
         "SOTLAS": "https://sotl.as/summits/4O/IC-001",
+        "marker-color": SOTA_MARKER_COLOR,  # style props served even when not in PROPERTYNAME
+        "marker-symbol": "circle-10",
     }
 
 
 def test_all_properties_and_types(client):
     fc = get_json(client, CALTOPO_TEMPLATE.format(bbox="42.47,19.84,42.50,19.86"))
     props = fc["features"][0]["properties"]
-    assert len(props) == 19
+    assert len(props) == 21  # 17 CSV + SOTLAS, Activations, marker-color, marker-symbol
     assert props["AltM"] == 2524          # int
     assert props["GridRef1"] == 19.8505   # float
     assert props["Activations"] == "1"    # string (the CAST parity)

@@ -46,6 +46,11 @@ def parse_bbox(raw: str) -> tuple[float, float, float, float]:
     return minx, miny, maxx, maxy
 
 
+# Style-hint columns are served even when PROPERTYNAME omits them, so
+# CalTopo's saved layer templates don't have to change to pick them up.
+_ALWAYS_SERVED = ("marker-color", "marker-symbol")
+
+
 def resolve_properties(data: LayerData, raw: str | None) -> list[str]:
     columns = list(data.props.columns)
     if raw is None:
@@ -58,6 +63,9 @@ def resolve_properties(data: LayerData, raw: str | None) -> list[str]:
             continue  # geometry is always emitted
         col = by_lower.get(name.lower())
         if col is not None:
+            out.append(col)
+    for col in _ALWAYS_SERVED:
+        if col in columns and col not in out:
             out.append(col)
     return out
 

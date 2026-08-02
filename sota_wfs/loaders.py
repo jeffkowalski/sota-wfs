@@ -20,6 +20,12 @@ SOTA_HEADER = (
 _SOTA_INT_COLS = ["AltM", "AltFt", "Points", "BonusPoints", "ActivationCount"]
 _SOTA_FLOAT_COLS = ["GridRef1", "GridRef2", "Longitude", "Latitude"]
 
+# Marker styling (see example map QVVPKB6): summits are red numbered circles
+# keyed by their point value; Superchargers use CalTopo's charging icon.
+SOTA_MARKER_COLOR = "#FF0000"
+NREL_MARKER_COLOR = "#ffaa00"
+NREL_MARKER_SYMBOL = "electric-charging"
+
 
 @dataclass
 class LayerData:
@@ -65,6 +71,12 @@ def sota_csv_loader(path: Path) -> LayerData:
     df["SOTLAS"] = "https://sotl.as/summits/" + df["SummitCode"]
     df["Activations"] = df["ActivationCount"].astype(object).map(
         lambda v: "" if pd.isna(v) else str(v)
+    )
+    # CalTopo's WFS renderer honors style properties served alongside the
+    # data (verified empirically 2026-08: dots follow marker-color).
+    df["marker-color"] = SOTA_MARKER_COLOR
+    df["marker-symbol"] = df["Points"].astype(object).map(
+        lambda v: "point" if pd.isna(v) else f"circle-{v}"
     )
     lons = df["Longitude"].to_numpy(dtype=np.float64)
     lats = df["Latitude"].to_numpy(dtype=np.float64)
@@ -130,4 +142,6 @@ def nrel_geojson_loader(path: Path) -> LayerData:
         lons.append(float(lon))
         lats.append(float(lat))
     df = pd.DataFrame(rows, columns=[out for out, _ in _NREL_PROPS])
+    df["marker-color"] = NREL_MARKER_COLOR
+    df["marker-symbol"] = NREL_MARKER_SYMBOL
     return _finish(df, np.asarray(lons), np.asarray(lats), mtime)
