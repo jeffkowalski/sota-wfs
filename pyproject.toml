@@ -1,0 +1,20 @@
+[project]
+name = "sota-wfs"
+version = "1.0.0"
+description = "Minimal WFS server for SOTA summits and Tesla Superchargers, for CalTopo ingestion"
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.0",
+    "waitress>=3.0",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["sota_wfs"]

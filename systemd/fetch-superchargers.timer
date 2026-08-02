@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly Tesla Supercharger refresh
+
+[Timer]
+OnCalendar=Sun *-*-* 05:23
+Persistent=true
+
+[Install]
+WantedBy=timers.target

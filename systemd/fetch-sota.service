@@ -1,0 +1,7 @@
+[Unit]
+Description=Fetch SOTA summits list
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Dropbox/workspace/sota-wfs
+ExecStart=%h/Dropbox/workspace/sota-wfs/.venv/bin/python fetch/fetch_sota.py

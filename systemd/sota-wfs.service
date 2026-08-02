@@ -1,0 +1,12 @@
+[Unit]
+Description=SOTA WFS server (port 8080)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/Dropbox/workspace/sota-wfs
+ExecStart=%h/Dropbox/workspace/sota-wfs/.venv/bin/python serve.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

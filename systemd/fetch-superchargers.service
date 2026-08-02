@@ -1,0 +1,9 @@
+[Unit]
+Description=Fetch Tesla Supercharger locations
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Dropbox/workspace/sota-wfs
+ExecStart=%h/Dropbox/workspace/sota-wfs/.venv/bin/python fetch/fetch_superchargers.py
+# Optional: put NREL_API_KEY=... in this file (not committed) for a personal API key
+EnvironmentFile=-%h/Dropbox/workspace/sota-wfs/.env

@@ -1,0 +1,11 @@
+[Unit]
+Description=ngrok tunnel for SOTA WFS (static domain)
+After=network-online.target sota-wfs.service
+
+[Service]
+ExecStart=/usr/local/bin/ngrok http --url=noneligible-unlithographic-robbie.ngrok-free.dev --log=stdout 8080
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

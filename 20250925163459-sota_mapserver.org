@@ -2,809 +2,158 @@
 :ID:       f486190f-ff8b-4297-a6ce-879c61eadc40
 :CREATED:  [2025-09-25 Thu 16:35]
 :END:
-#+title: SOTA → GeoServer WFS → CalTopo (literate/parameterized)
+#+title: SOTA → Python WFS → CalTopo
 #+author: Jeff Kowalski
 #+filetags: :sota:caltopo:
 #+options: toc:2 ^:nil
 
 #+PROPERTY: header-args :eval no-export :exports both
-# Global header args for all shell blocks
-#+PROPERTY: header-args:sh :session sota :results output :noweb yes
+#+PROPERTY: header-args:sh :results output
 
 * Overview
-Parameterized, repeatable pipeline to publish SOTA summits through GeoServer
-(WFS 2.0.0) and consume in CalTopo. Uses a persistent bash session and noweb
-references for clean, reusable code blocks.
 
-All shell blocks use =:session sota= for variable persistence.
+A minimal Python WFS server publishes SOTA summit locations (and Tesla
+Supercharger locations) for consumption in CalTopo, via an ngrok https tunnel.
 
-* Prerequisites
+This replaces the earlier GeoServer/docker/ogr2ogr pipeline. CalTopo only ever
+issues two request shapes — =GetCapabilities= and =GetFeature= with a BBOX,
+GeoJSON output — so the server (=sota_wfs/=, ~400 lines of Flask) implements
+exactly that and nothing more. Data is loaded straight from the downloaded
+artifacts into memory (pandas/numpy); there is no GeoPackage, no GDAL, no Java,
+no docker.
 
-** Required Tools
+Components:
+- =serve.py= — WFS server on port 8080 (waitress; trusts ngrok's
+  =X-Forwarded-*= headers so capabilities URLs come out as https).
+- =fetch/fetch_sota.py= — downloads https://storage.sota.org.uk/summitslist.csv,
+  validates it, atomically swaps it into =data/=. Daily systemd timer.
+- =fetch/fetch_superchargers.py= — downloads Tesla Supercharger locations (CA)
+  from the alt-fuel-stations API at developer.nlr.gov. Weekly systemd timer.
+  Set =NREL_API_KEY= in =.env= for a personal key (default: rate-limited DEMO_KEY).
+- =systemd/= — user units for the server, ngrok, and both fetch timers.
+- The server hot-reloads: it stats the data files at most every 15 s and
+  reloads when the mtime changes, so fetches need no server restart.
 
-This pipeline requires the following tools to be installed on Ubuntu/Debian/Linux Mint:
+Layers served (namespace =sota=):
+- =sota:SOTA_Summits= — all summit fields plus =SOTLAS= (link to
+  https://sotl.as) and =Activations= (activation count as a string, so "0"
+  still displays in CalTopo).
+- =sota:Tesla_Superchargers= — station name, address, stall count, etc.
 
-*** GDAL/OGR (for ogr2ogr and ogrinfo)
+* Installation
 
-#+begin_src sh :session none :eval never
-sudo apt update
-sudo apt install gdal-bin
+Prerequisites: =python3=, =ngrok= (with authtoken:
+=ngrok config add-authtoken ...=). Then:
+
+#+begin_src sh :eval never
+git clone git@github.com:jeffkowalski/sota-wfs.git ~/Dropbox/workspace/sota-wfs
+cd ~/Dropbox/workspace/sota-wfs
+./install.sh
 #+end_src
 
-Verify installation:
-#+begin_src sh :session none
-ogr2ogr --version
-ogrinfo --version
-#+end_src
+=install.sh= creates the venv, does the initial data fetch, installs the
+systemd user units (rewriting paths to wherever the repo lives), enables and
+starts everything, and enables lingering so services run without a login
+session.
 
-*** Docker and Docker Compose
+Note: the ngrok unit pins the tunnel to this account's static domain
+=noneligible-unlithographic-robbie.ngrok-free.dev=. A new owner gets their own
+static domain at https://dashboard.ngrok.com → Domains, edits
+=systemd/ngrok.service= accordingly, re-runs =./install.sh=, and updates the
+hostname in the CalTopo layer URLs once.
 
-Verify Docker and Docker Compose plugin are installed:
-
-#+begin_src sh :session none
-docker --version
-docker compose version
-#+end_src
-
-*** ngrok (for HTTPS tunneling to CalTopo)
-
-Install ngrok - see https://ngrok.com/download/linux
-
-#+begin_src sh :session none :eval never
-curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-  | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null \
-  && echo "deb https://ngrok-agent.s3.amazonaws.com bookworm main" \
-  | sudo tee /etc/apt/sources.list.d/ngrok.list \
-  && sudo apt update \
-  && sudo apt install ngrok
-#+end_src
-
-*Setup ngrok account (required):*
-1. Sign up at https://dashboard.ngrok.com/signup
-2. Get your authtoken from https://dashboard.ngrok.com/get-started/your-authtoken
-3. Configure ngrok:
-   #+begin_src sh :session none :eval never
-   ngrok config add-authtoken YOUR_AUTHTOKEN_HERE
-   #+end_src
-
-Verify installation:
-#+begin_src sh :session none
-ngrok version
-#+end_src
-
-*** jq (for pretty JSON formatting)
-
-#+begin_src sh :session none :eval never
-sudo apt install jq
-#+end_src
-
-Verify installation:
-#+begin_src sh :session none
-jq --version
-#+end_src
-
-** Verify All Dependencies
-
-Run this block to check if all required tools are installed:
-
-#+begin_src sh :session none :shebang "#!/bin/bash"
-echo "=== Checking Dependencies ==="
-echo ""
-
-check_command() {
-  if which "$1" > /dev/null 2>&1; then
-    echo "✓ $1 is installed"
-    "$1" --version 2>&1 | head -n 1 || echo "  (version info unavailable)"
-  else
-    echo "✗ $1 is NOT installed"
-  fi
-  echo ""
-}
-
-check_command ogr2ogr
-check_command ogrinfo
-check_command docker
-check_command ngrok
-check_command jq
-
-echo "=== Docker daemon status ==="
-if systemctl is-active --quiet docker 2>/dev/null; then
-  echo "✓ Docker daemon is running"
-elif pgrep dockerd > /dev/null 2>&1; then
-  echo "✓ Docker daemon is running"
-else
-  echo "✗ Docker daemon is not running (or you need to start it)"
-fi
-#+end_src
-
-* Configuration Variables
-
-** Base Paths
-Define core directory structure for the shell session.
-
-#+name: variables
-#+begin_src sh :results silent
-export ROOT_DIR="$HOME/Dropbox/workspace/sota-wfs"
-export DATA_DIR="$ROOT_DIR/data"
-export GPKG="$DATA_DIR/sota.gpkg"
-#+end_src
-
-** Layer and Service Configuration
-#+name: config
-#+begin_src sh :results silent
-export LAYER="SOTA_Summits"
-export WS="sota"
-export GS_BASE="http://localhost:8080/geoserver"
-#+end_src
-
-** Initialize Session
-Execute this to load all variables into the persistent session:
+* Operations
 
 #+begin_src sh
-<<variables>>
-<<config>>
-
-echo "Session initialized with:"
-echo "  ROOT_DIR = $ROOT_DIR"
-echo "  DATA_DIR = $DATA_DIR"
-echo "  GPKG = $GPKG"
-echo "  LAYER = $LAYER"
-echo "  WS = $WS"
-echo "  GS_BASE = $GS_BASE"
+systemctl --user status sota-wfs ngrok --no-pager | head -20
 #+end_src
-
-* Prep Folders
-#+begin_src sh
-mkdir -p "$DATA_DIR"
-echo "Created DATA_DIR at: $DATA_DIR"
-ls -la "$ROOT_DIR"
-#+end_src
-
-* Fetch SOTA CSV and Clean Header
-The first line in the SOTA CSV is a title, not headers.
 
 #+begin_src sh
-curl -fsSL -o "$DATA_DIR/summitslist.csv" https://storage.sota.org.uk/summitslist.csv
-
-# Remove title line (keep header and all data)
-tail -n +2 "$DATA_DIR/summitslist.csv" > "$DATA_DIR/summitslist_clean.csv"
-
-echo "Line counts:"
-wc -l "$DATA_DIR"/summitslist*.csv
-echo ""
-echo "First 2 lines of cleaned CSV:"
-head -n 2 "$DATA_DIR/summitslist_clean.csv"
+systemctl --user list-timers fetch-sota.timer fetch-superchargers.timer --no-pager
 #+end_src
 
-* Build GeoPackage (CSV → GPKG)
-Convert CSV to GeoPackage with proper geometry and CRS:
-- Geometry from =Longitude= and =Latitude= columns
-- Geometry column name: =the_geom=
-- Adds computed SOTLAS field (https://sotl.as/summits/ + SummitCode)
+Logs:
+#+begin_src sh :eval never
+journalctl --user -u sota-wfs -f
+journalctl --user -u fetch-sota
+#+end_src
 
+Manual data refresh (server picks it up within ~15 s):
 #+begin_src sh
-# Step 1: Create basic GPKG with geometry from CSV
-ogr2ogr -f GPKG "$GPKG" \
-  "$DATA_DIR/summitslist_clean.csv" \
-  -oo HEADERS=YES -oo AUTODETECT_TYPE=YES \
-  -oo X_POSSIBLE_NAMES=Longitude -oo Y_POSSIBLE_NAMES=Latitude \
-  -nln "${LAYER}_temp" \
-  -nlt POINT -a_srs EPSG:4326 -lco GEOMETRY_NAME=the_geom
-
-
-# Step 2: Add SOTLAS field and
-# convert ActivationCount to text so even "0" will be displayed
-ogr2ogr -f GPKG "$GPKG" "$GPKG" "${LAYER}_temp" \
-  -nln "$LAYER" \
-  -sql "SELECT *, 
-        'https://sotl.as/summits/' || SummitCode AS SOTLAS,
-        CAST(ActivationCount AS TEXT) AS Activations,
-        the_geom 
-        FROM ${LAYER}_temp" \
-  -dialect SQLite \
-  -update -overwrite
-
-# Step 3: Remove temporary layer
-ogrinfo "$GPKG" -sql "DROP TABLE ${LAYER}_temp"
-
-echo ""
-echo "Sanity checks:"
-ogrinfo "$GPKG" -sql "SELECT COUNT(*) AS total FROM $LAYER"
-echo ""
-echo "Sample features with geometry and SOTLAS:"
-ogrinfo "$GPKG" -sql "SELECT SummitCode, SummitName, SOTLAS, Activations, AsText(the_geom) AS wkt FROM $LAYER LIMIT 3"
+.venv/bin/python fetch/fetch_sota.py
 #+end_src
 
-* Docker Compose Configuration
-
-Configuration for GeoServer container:
-- CORS enabled
-- Volume mount to your data directory
-- Admin password: =geoserver=
-
+Tests:
 #+begin_src sh
-cat > "$ROOT_DIR/docker-compose.yml" <<EOF
-services:
-  geoserver:
-    image: kartoza/geoserver:latest
-    container_name: geoserver
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      GEOSERVER_ADMIN_USER: admin
-      GEOSERVER_ADMIN_PASSWORD: geoserver
-      ENABLE_CORS: "true"
-      CORS_ALLOWED_ORIGINS: "*"
-      CORS_ALLOWED_METHODS: "GET,POST,PUT,DELETE,HEAD,OPTIONS"
-      CORS_ALLOWED_HEADERS: "*"
-    volumes:
-      - $DATA_DIR:/opt/geoserver/data_dir/external
-EOF
-
-echo "Created docker-compose.yml at: $ROOT_DIR/docker-compose.yml"
+.venv/bin/python -m pytest tests/ -q
 #+end_src
 
-* Launch GeoServer
+* CalTopo integration
+
+The tunnel URL (stable, static domain):
 #+begin_src sh
-cd "$ROOT_DIR"
-docker compose up -d
-echo ""
-docker ps --filter "name=geoserver"
+echo https://noneligible-unlithographic-robbie.ngrok-free.dev
 #+end_src
 
-* Container Management Commands
+** Auto-configuration (Add WFS layer)
 
-** Restart GeoServer
-#+begin_src sh
-docker compose -f "$ROOT_DIR/docker-compose.yml" restart geoserver
-#+end_src
-
-** Stop and Remove
-#+begin_src sh
-docker compose -f "$ROOT_DIR/docker-compose.yml" down
-#+end_src
-
-** View Logs
-#+begin_src sh
-docker compose -f "$ROOT_DIR/docker-compose.yml" logs -f geoserver
-#+end_src
-
-* GeoServer Configuration (Automated via REST API)
-
-Wait for GeoServer to be fully started before running these blocks.
-
-** Check GeoServer Status
-Verify GeoServer is ready to accept REST API calls:
-
-#+begin_src sh
-echo "Checking GeoServer status..."
-echo "Container status:"
-docker ps --filter "name=geoserver" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-echo ""
-
-echo "Testing REST API endpoint..."
-RESPONSE=$(curl -s -w "\n%{http_code}" "$GS_BASE/rest/about/version.json" -u admin:geoserver)
-HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "✓ GeoServer is ready (HTTP $HTTP_CODE)"
-  echo "$RESPONSE" | sed '$d' | jq -M '.about.resource[0] | {name, version}'
-else
-  echo "✗ GeoServer not ready yet (HTTP $HTTP_CODE)"
-  echo "Wait 30-60 seconds and try again, or check logs with:"
-  echo "  docker compose -f $ROOT_DIR/docker-compose.yml logs geoserver"
-fi
-echo ""
-#+end_src
-
-** Create Workspace
-#+begin_src sh
-echo "Creating workspace: $WS"
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$GS_BASE/rest/workspaces" \
-  -H "Content-Type: application/json" \
-  -u admin:geoserver \
-  -d "{\"workspace\":{\"name\":\"$WS\"}}")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "201" ]; then
-  echo "✓ Workspace created successfully (HTTP $HTTP_CODE)"
-elif [ "$HTTP_CODE" = "409" ] || [ "$HTTP_CODE" = "401" ] || ([ "$HTTP_CODE" = "500" ] && echo "$BODY" | grep -q "already exists"); then
-  echo "⚠ Workspace already exists - continuing..."
-else
-  echo "✗ Error creating workspace (HTTP $HTTP_CODE)"
-  echo "Response: $BODY"
-fi
-echo ""
-#+end_src
-
-** Delete Existing Datastore (if needed)
-If you need to recreate the datastore with the correct container path:
-
-#+begin_src sh
-echo "Deleting existing datastore (if present)..."
-RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \
-  "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg?recurse=true" \
-  -u admin:geoserver)
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "✓ Datastore deleted successfully"
-elif [ "$HTTP_CODE" = "404" ]; then
-  echo "⚠ Datastore doesn't exist (nothing to delete)"
-else
-  echo "⚠ Delete returned HTTP $HTTP_CODE (may already be gone)"
-fi
-echo ""
-#+end_src
-
-** Create GeoPackage Datastore
-#+begin_src sh
-# Path to GPKG inside the Docker container (not host path!)
-GPKG_CONTAINER_PATH="/opt/geoserver/data_dir/external/sota.gpkg"
-
-echo "Creating GeoPackage datastore: sota_gpkg"
-echo "Container GPKG path: file://$GPKG_CONTAINER_PATH"
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$GS_BASE/rest/workspaces/$WS/datastores" \
-  -H "Content-Type: application/json" \
-  -u admin:geoserver \
-  -d "{
-    \"dataStore\": {
-      \"name\": \"sota_gpkg\",
-      \"type\": \"GeoPackage\",
-      \"enabled\": true,
-      \"connectionParameters\": {
-        \"entry\": [
-          {\"@key\": \"database\", \"$\": \"file://$GPKG_CONTAINER_PATH\"},
-          {\"@key\": \"dbtype\", \"$\": \"geopkg\"}
-        ]
-      }
-    }
-  }")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "201" ]; then
-  echo "✓ Datastore created successfully (HTTP $HTTP_CODE)"
-elif [ "$HTTP_CODE" = "500" ] && echo "$BODY" | grep -q "already exists"; then
-  echo "⚠ Datastore already exists (continuing...)"
-else
-  echo "✗ Error creating datastore (HTTP $HTTP_CODE)"
-  echo "Response: $BODY"
-fi
-echo ""
-#+end_src
-
-** Check Available Layers in Datastore
-Before publishing, check what layers GeoServer can see in the GPKG:
-
-#+begin_src sh
-echo "Checking available feature types in datastore..."
-curl -s "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg/featuretypes.json?list=available" \
-  -u admin:geoserver | jq -M '.'
-echo ""
-echo "Layers currently published:"
-curl -s "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg/featuretypes.json" \
-  -u admin:geoserver | jq -M '.'
-#+end_src
-
-** Publish Layer
-#+begin_src sh
-echo "Publishing layer: $LAYER"
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg/featuretypes" \
-  -H "Content-Type: application/json" \
-  -u admin:geoserver \
-  -d "{
-    \"featureType\": {
-      \"name\": \"$LAYER\",
-      \"nativeName\": \"$LAYER\",
-      \"title\": \"SOTA Summits\",
-      \"abstract\": \"Summits on the Air (SOTA) summit locations\",
-      \"enabled\": true,
-      \"srs\": \"EPSG:4326\",
-      \"projectionPolicy\": \"FORCE_DECLARED\"
-    }
-  }")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "201" ]; then
-  echo "✓ Layer published successfully (HTTP $HTTP_CODE)"
-elif [ "$HTTP_CODE" = "500" ] && echo "$BODY" | grep -q "already exists"; then
-  echo "⚠ Layer already exists (continuing...)"
-else
-  echo "✗ Error publishing layer (HTTP $HTTP_CODE)"
-  if [ -n "$BODY" ]; then
-    echo "Response: $BODY"
-  else
-    echo "No response body returned"
-    echo ""
-    echo "Checking what layers are available to publish:"
-    curl -s "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg/featuretypes.json?list=available" \
-      -u admin:geoserver | jq -M -r '.list.string[]? // "No layers found in GPKG"'
-  fi
-fi
-echo ""
-#+end_src
-
-** Configure Bounding Boxes
-#+begin_src sh
-echo "Configuring bounding boxes for layer: $LAYER"
-
-# GeoServer requires a body for PUT requests, even when using recalculate
-echo "Recalculating bounding boxes from data..."
-RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
-  "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg/featuretypes/$LAYER.json?recalculate=nativebbox,latlonbbox" \
-  -H "Content-Type: application/json" \
-  -u admin:geoserver \
-  -d '{"featureType":{}}')
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "✓ Bounding boxes recalculated successfully"
-else
-  echo "⚠ Warning: Bounding box recalculation returned HTTP $HTTP_CODE"
-  if [ -n "$BODY" ]; then
-    echo "Response: $BODY"
-  fi
-fi
-echo ""
-#+end_src
-
-** Verify Configuration
-#+begin_src sh
-echo "Verifying workspace and layer configuration..."
-echo ""
-echo "=== Workspace ==="
-curl -s "$GS_BASE/rest/workspaces/$WS.json" -u admin:geoserver | jq -M '.'
-echo ""
-echo "=== Datastore ==="
-curl -s "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg.json" -u admin:geoserver | jq -M '.dataStore | {name, type, enabled}'
-echo ""
-echo "=== Layer (checking if it exists) ==="
-LAYER_RESPONSE=$(curl -s -w "\n%{http_code}" "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg/featuretypes/$LAYER.json" -u admin:geoserver)
-HTTP_CODE=$(echo "$LAYER_RESPONSE" | tail -n 1)
-LAYER_JSON=$(echo "$LAYER_RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "$LAYER_JSON" | jq -M '.featureType | {name, title, enabled, srs, nativeBoundingBox, latLonBoundingBox}'
-else
-  echo "Error: Layer not found or error occurred (HTTP $HTTP_CODE)"
-  echo "Response:"
-  echo "$LAYER_JSON"
-  echo ""
-  echo "Available layers in datastore (available to publish):"
-  curl -s "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg/featuretypes.json?list=available" -u admin:geoserver | jq -M -r '.list.string[]? // "None found"'
-  echo ""
-  echo "Currently published layers:"
-  PUBLISHED=$(curl -s "$GS_BASE/rest/workspaces/$WS/datastores/sota_gpkg/featuretypes.json" -u admin:geoserver)
-  echo "$PUBLISHED" | jq -M -r '.featureTypes.featureType[]?.name // "None published"'
-fi
-#+end_src
-
-* GeoServer Configuration (Manual UI Steps - Alternative)
-If you prefer to configure via the UI instead of using the REST API above:
-
-1. Login at http://localhost:8080/geoserver with =admin= / =geoserver=
-2. *Workspaces* → Create new workspace =sota= (if not exists)
-3. *Stores → Add new Store* → GeoPackage
-   - Workspace: =sota=
-   - Data Source Name: =sota_gpkg=
-   - Database: browse to =$DATA_DIR/sota.gpkg=
-   - Save
-4. *Layers → Add a new resource*
-   - Choose =sota:SOTA_Summits= from the store
-   - Click "Publish"
-5. On the layer configuration page:
-   - *Compute from data* (Native Bounding Box)
-   - *Compute from lat/lon bounds* (Lat/Lon Bounding Box)
-   - Save
-
-* Verify WFS Service (Local)
-
-** GetCapabilities Request
-#+begin_src sh
-echo "Requesting WFS Capabilities..."
-echo "URL: $GS_BASE/wfs?service=WFS&version=2.0.0&request=GetCapabilities"
-echo ""
-
-RESPONSE=$(curl -s -w "\n%{http_code}" "$GS_BASE/wfs?service=WFS&version=2.0.0&request=GetCapabilities")
-HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-echo "HTTP Status: $HTTP_CODE"
-echo ""
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "Response size: $(echo "$BODY" | wc -c) bytes"
-  echo ""
-  echo "First 1000 characters (XML likely on one line):"
-  echo "$BODY" | cut -c1-1000
-  echo ""
-  echo "..."
-  echo ""
-  echo "Checking for SOTA_Summits layer:"
-  echo "$BODY" | grep -o "SOTA_Summits" | head -n 1
-else
-  echo "Error response:"
-  echo "$BODY" | head -n 20
-fi
-#+end_src
-
-** GetFeature Sample (First 3 Features)
-#+begin_src sh
-echo "Fetching sample features..."
-curl -fsSL "$GS_BASE/wfs?service=WFS&version=2.0.0&request=GetFeature" \
-  --get \
-  --data-urlencode "typeNames=$WS:$LAYER" \
-  --data-urlencode "propertyName=SummitCode,SummitName,AssociationName,the_geom" \
-  --data-urlencode "count=3" \
-  --data-urlencode "outputFormat=application/json" | jq -M '.'
-#+end_src
-
-** BBox Query Test
-CRS84 uses lon,lat order. Testing a small area in the Balkans:
-
-#+begin_src sh
-CRS84="urn:ogc:def:crs:OGC:1.3:CRS84"
-
-echo "Testing BBox query..."
-curl -fsSL "$GS_BASE/wfs?service=WFS&version=2.0.0&request=GetFeature" \
-  --get \
-  --data-urlencode "typeNames=$WS:$LAYER" \
-  --data-urlencode "srsName=$CRS84" \
-  --data-urlencode "bbox=19.84,42.47,19.86,42.50,$CRS84" \
-  --data-urlencode "propertyName=SummitCode,SummitName,AssociationName,the_geom" \
-  --data-urlencode "count=5" \
-  --data-urlencode "outputFormat=application/json" | jq -M '.'
-#+end_src
-
-* Expose via ngrok (for CalTopo HTTPS)
-
-** Start ngrok Tunnel
-Run this in a separate terminal (not in the Emacs session):
-
-#+begin_example sh
-ngrok http 8080
-#+end_example
-
-Or, if you have a paid plan with a reserved domain:
-#+begin_example sh
-ngrok http --domain=your-reserved-domain.ngrok.dev 8080
-#+end_example
-
-** Get Current Tunnel URL
-Once ngrok is running, use this block to automatically fetch your tunnel URL:
-
-#+begin_src sh
-if curl -s http://localhost:4040/api/tunnels > /dev/null 2>&1; then
-  TUNNEL_URL=$(curl -s http://localhost:4040/api/tunnels | jq -M -r '.tunnels[0].public_url')
-  echo "Ngrok tunnel found:"
-  echo "  $TUNNEL_URL"
-  echo ""
-  echo "Update your config with this URL if needed"
-else
-  echo "Ngrok is not running or API not accessible at localhost:4040"
-  echo "Start ngrok first: ngrok http 8080"
-fi
-#+end_src
-
-#+RESULTS:
-: Ngrok tunnel found:
-:   https://noneligible-unlithographic-robbie.ngrok-free.dev
-: 
-: Update your config with this URL if needed
-
-** Update Configuration with Tunnel URL
-If you want to save the tunnel URL to your session:
-
-#+begin_src sh
-if curl -s http://localhost:4040/api/tunnels > /dev/null 2>&1; then
-  export TUNNEL_URL=$(curl -s http://localhost:4040/api/tunnels | jq -M -r '.tunnels[0].public_url')
-  echo "Tunnel URL saved to session:"
-  echo "  TUNNEL_URL = $TUNNEL_URL"
-else
-  echo "Error: ngrok not running"
-fi
-#+end_src
-
-** Test Through Tunnel
-
-#+begin_src sh
-if [ -z "$TUNNEL_URL" ]; then
-  echo "Getting tunnel URL from ngrok..."
-  TUNNEL_URL=$(curl -s http://localhost:4040/api/tunnels | jq -M -r '.tunnels[0].public_url')
-fi
-
-if [ -n "$TUNNEL_URL" ] && [ "$TUNNEL_URL" != "null" ]; then
-  echo "Testing tunnel at: $TUNNEL_URL"
-  echo ""
-  curl -fsSL "$TUNNEL_URL/geoserver/$WS/wfs?service=WFS&version=2.0.0&request=GetCapabilities" | head -n 30
-else
-  echo "Error: Could not get tunnel URL. Is ngrok running?"
-fi
-#+end_src
-
-#+RESULTS:
-: Getting tunnel URL from ngrok...
-
-* CalTopo Integration
-
-** Auto-Configure URL (GetCapabilities)
-Use the "Generate CalTopo URLs" block below to get your current tunnel URL, or manually construct:
-
+In CalTopo: Add → Layer → WFS, paste:
 #+begin_example
-https://<your-ngrok-url>.ngrok-free.dev/geoserver/sota/wfs?service=WFS&version=2.0.0&request=GetCapabilities
+https://noneligible-unlithographic-robbie.ngrok-free.dev/geoserver/sota/wfs?service=WFS&version=2.0.0&request=GetCapabilities
 #+end_example
 
-** Manual Template URL (All Fields)
-If auto-configuration doesn't work, use this template.
-CalTopo expects =BBOX={bottom},{left},{top},{right}=:
+** Manual layer templates
 
+SOTA summits, limited fields (SOTLAS link + activation count):
 #+begin_example
-https://<your-ngrok-url>.ngrok-free.dev/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=sota:SOTA_Summits
+https://noneligible-unlithographic-robbie.ngrok-free.dev/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=sota:SOTA_Summits&PROPERTYNAME=SummitCode,SummitName,Points,BonusPoints,Activations,SOTLAS,the_geom
 #+end_example
 
-** Manual Template URL (Limited Fields)
-Shows only: SummitCode, SummitName, Points, BonusPoints, Activations, SOTLAS
-
+SOTA summits, all fields:
 #+begin_example
-https://<your-ngrok-url>.ngrok-free.dev/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=sota:SOTA_Summits&PROPERTYNAME=SummitCode,SummitName,Points,BonusPoints,Activations,SOTLAS,the_geom
+https://noneligible-unlithographic-robbie.ngrok-free.dev/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=sota:SOTA_Summits
 #+end_example
 
-** Generate CalTopo URLs
+Tesla Superchargers:
+#+begin_example
+https://noneligible-unlithographic-robbie.ngrok-free.dev/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=sota:Tesla_Superchargers
+#+end_example
+
+Example map: https://caltopo.com/m/0N832Q6
+
+* Verification
+
+Local capabilities (both layers listed, =application/json= advertised):
 #+begin_src sh
-if [ -z "$TUNNEL_URL" ]; then
-  echo "Getting tunnel URL from ngrok..."
-  TUNNEL_URL=$(curl -s http://localhost:4040/api/tunnels | jq -M -r '.tunnels[0].public_url')
-fi
-
-if [ -n "$TUNNEL_URL" ] && [ "$TUNNEL_URL" != "null" ]; then
-  echo "=== CalTopo Auto-Configure URL ==="
-  echo "${TUNNEL_URL}/geoserver/${WS}/wfs?service=WFS&version=2.0.0&request=GetCapabilities"
-  echo ""
-  echo "=== CalTopo Manual Template URL (All Fields) ==="
-  echo "${TUNNEL_URL}/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=${WS}:${LAYER}"
-  echo ""
-  echo "=== CalTopo Manual Template URL (Limited Fields with SOTLAS) ==="
-  echo "${TUNNEL_URL}/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=${WS}:${LAYER}&PROPERTYNAME=SummitCode,SummitName,Points,BonusPoints,Activations,SOTLAS,the_geom"
-else
-  echo "Error: Could not get tunnel URL. Is ngrok running?"
-  echo "Start ngrok with: ngrok http 8080"
-fi
+curl -fsS 'http://localhost:8080/geoserver/sota/wfs?service=WFS&version=2.0.0&request=GetCapabilities' | grep -c 'sota:'
 #+end_src
 
-#+RESULTS:
-: Getting tunnel URL from ngrok...
-: === CalTopo Auto-Configure URL ===
-: https://noneligible-unlithographic-robbie.ngrok-free.dev/geoserver/sota/wfs?service=WFS&version=2.0.0&request=GetCapabilities
-: 
-: === CalTopo Manual Template URL (All Fields) ===
-: https://noneligible-unlithographic-robbie.ngrok-free.dev/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=sota:SOTA_Summits
-: 
-: === CalTopo Manual Template URL (Limited Fields with SOTLAS) ===
-: https://noneligible-unlithographic-robbie.ngrok-free.dev/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX={bottom},{left},{top},{right}&OUTPUTFORMAT=application/json&TYPENAMES=sota:SOTA_Summits&PROPERTYNAME=SummitCode,SummitName,Points,BonusPoints,Activations,SOTLAS,the_geom
+Exact CalTopo request shape (Maja Rosit test summit):
+#+begin_src sh
+curl -fsS 'http://localhost:8080/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX=42.47,19.84,42.50,19.86&OUTPUTFORMAT=application/json&TYPENAMES=sota:SOTA_Summits&PROPERTYNAME=SummitCode,SummitName,Points,BonusPoints,Activations,SOTLAS,the_geom' | jq -M '.features[0]'
+#+end_src
+
+Through the tunnel:
+#+begin_src sh
+curl -fsS 'https://noneligible-unlithographic-robbie.ngrok-free.dev/geoserver/wfs?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&BBOX=37.3,-122.1,37.5,-121.9&OUTPUTFORMAT=application/json&TYPENAMES=sota:Tesla_Superchargers' | jq -M '.totalFeatures'
+#+end_src
 
 * Troubleshooting
 
-** Common Issues
+- CalTopo shows no features :: Check the tunnel and server:
+  =systemctl --user status sota-wfs ngrok=. The capabilities response must
+  contain https hrefs with the ngrok hostname (not localhost) — if not, ngrok's
+  =X-Forwarded-*= headers aren't reaching waitress (see =trusted_proxy= in
+  =serve.py=).
+- Stale data :: =journalctl --user -u fetch-sota= — the fetcher refuses to
+  replace the file if the download fails validation (wrong header, too few
+  rows), which is intentional.
+- Port 8080 busy :: Something else (old GeoServer container?) holds the port:
+  =ss -tlnp | grep 8080=.
 
-*** Empty or Zero Bounding Box
-If "Compute from data" shows bbox near zero:
-- Verify the GPKG has non-null =the_geom= column
-- Re-run the "Build GeoPackage" step
-- Check with: =ogrinfo "$GPKG" -sql "SELECT the_geom FROM $LAYER LIMIT 5"=
+* History
 
-*** WFS Requests Hang
-Restart the container:
-#+begin_src sh
-docker compose -f "$ROOT_DIR/docker-compose.yml" restart geoserver
-sleep 5
-docker ps --filter "name=geoserver"
-#+end_src
-
-*** CalTopo Connection Errors
-- Ensure you're using the HTTPS ngrok URL (not HTTP localhost)
-- Verify ngrok is running: =curl -I <ngrok-url>=
-- Check GeoServer logs for errors
-
-*** Attribute Not Found
-- Check layer fields in GeoServer UI
-- Test with: =ogrinfo "$GPKG" -sql "SELECT * FROM $LAYER LIMIT 1"=
-
-** Quick Diagnostics
-#+begin_src sh
-echo "=== Environment Check ==="
-echo "ROOT_DIR: $ROOT_DIR"
-echo "DATA_DIR: $DATA_DIR"
-echo "GPKG exists: $(test -f "$GPKG" && echo YES || echo NO)"
-echo "GPKG size: $(du -h "$GPKG" 2>/dev/null | cut -f1)"
-echo ""
-echo "=== Layer Info ==="
-ogrinfo "$GPKG" -so "$LAYER" 2>/dev/null | head -n 20
-echo ""
-echo "=== Container Status ==="
-docker ps --filter "name=geoserver" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-#+end_src
-
-* Complete Pipeline Execution
-
-To run the entire pipeline from scratch:
-
-1. Execute the "Initialize Session" block (=C-c C-c=)
-2. Execute each subsequent block in order
-3. Start ngrok in separate terminal
-4. Test and integrate with CalTopo
-
-Or execute all code blocks at once with:
-=M-x org-babel-execute-buffer=
-
-* Session Management
-
-** Clear Session
-Kill the persistent bash session to start fresh:
-
-#+begin_src emacs-lisp
-(when (get-buffer "*sota*")
-  (kill-buffer "*sota*")
-  (message "Killed *sota* session buffer"))
-#+end_src
-
-After clearing the session, re-run "Initialize Session" to start fresh.
-
-* Reset Pipeline
-
-⚠️ **WARNING:** This will remove all project data and Docker resources!
-
-This will:
-- Stop and remove the GeoServer container
-- Remove all GeoServer Docker images
-- Delete the entire ROOT_DIR (including all data files)
-- Keep installed software (apt packages)
-
-#+begin_src sh
-echo "=== COMPLETE RESET ==="
-echo ""
-echo "⚠️  This will remove:"
-echo "  - GeoServer Docker container and images"
-echo "  - All data in $ROOT_DIR"
-echo ""
-
-# Stop and remove container
-echo "Stopping GeoServer container..."
-docker stop geoserver 2>/dev/null || echo "  Container not running"
-docker rm geoserver 2>/dev/null || echo "  Container already removed"
-
-# Remove all GeoServer images
-echo ""
-echo "Removing GeoServer Docker images..."
-GEOSERVER_IMAGES=$(docker images kartoza/geoserver -q)
-if [ -n "$GEOSERVER_IMAGES" ]; then
-  docker rmi $GEOSERVER_IMAGES 2>/dev/null && echo "  ✓ Removed GeoServer images" || echo "  Images already removed"
-else
-  echo "  No GeoServer images found"
-fi
-
-# Remove project directory
-echo ""
-echo "Removing project directory: $ROOT_DIR"
-if [ -d "$ROOT_DIR" ]; then
-  rm -rf "$ROOT_DIR"
-  echo "  ✓ Removed $ROOT_DIR"
-else
-  echo "  Directory does not exist"
-fi
-
-echo ""
-echo "Cleanup complete!"
-echo ""
-echo "Installed software (gdal-bin, docker, ngrok, jq) is still available."
-echo "To rebuild from scratch, run the org file from 'Initialize Session'."
-#+end_src
+Until 2026-08 this was a GeoServer pipeline: CSV → ogr2ogr → GeoPackage →
+kartoza/geoserver docker container configured over REST, ngrok run by hand,
+all driven manually from org-babel blocks in this file. See git history of
+this file for the full literate version.
