@@ -11,6 +11,8 @@ FIXTURE_CSV = textwrap.dedent(
     W6/NC-001,USA,California Nevada County,Mount Lola,2774,9101,-120.5217,39.4337,-120.52170,39.43370,10,3,01/07/2010,31/12/2099,42,01/01/2024,N0CALL
     W6/NC-002,USA,California Nevada County,Castle Peak,2775,9103,-120.3517,39.3657,-120.35170,39.36570,10,3,01/07/2010,31/12/2099,0,,
     3Y/BV-001,Bouvet Island,Bouvetoya,Olavtoppen,780,2559,3.3565,-54.4104,3.35650,-54.41040,10,3,01/03/2018,31/12/2099,0,,
+    W6/CC-067,USA - California,Coastal Ranges,Oyster Point,642,2106,-121.8777,37.8305,-121.87770,37.83050,1,0,01/07/2009,31/07/2012,0,,
+    W6/XX-999,USA - California,Nowhere Yet,Future Peak,1000,3281,-120.0000,38.0000,-120.00000,38.00000,1,0,01/01/2099,31/12/2099,0,,
     """
 )
 
@@ -112,6 +114,13 @@ def test_no_bbox_returns_all_and_count_limits(client):
     )
     assert fc["numberReturned"] == 2
     assert fc["numberMatched"] == 4
+
+
+def test_invalid_summits_omitted(client):
+    fc = get_json(client, "/geoserver/wfs?service=wfs&request=getfeature&typename=sota:SOTA_Summits")
+    codes = {f["properties"]["SummitCode"] for f in fc["features"]}
+    assert "W6/CC-067" not in codes  # retired 31/07/2012
+    assert "W6/XX-999" not in codes  # not valid until 2099
 
 
 def test_param_case_insensitivity_and_both_routes(client):

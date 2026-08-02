@@ -53,6 +53,15 @@ def sota_csv_loader(path: Path) -> LayerData:
     for col in _SOTA_INT_COLS:
         df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
     df = df.dropna(subset=["Longitude", "Latitude"]).reset_index(drop=True)
+    # Serve only currently-valid summits (ValidFrom/ValidTo are DD/MM/YYYY);
+    # a missing bound is treated as unbounded.
+    today = pd.Timestamp.today().normalize()
+    valid_from = pd.to_datetime(df["ValidFrom"], format="%d/%m/%Y", errors="coerce")
+    valid_to = pd.to_datetime(df["ValidTo"], format="%d/%m/%Y", errors="coerce")
+    df = df[
+        (valid_from.isna() | (valid_from <= today))
+        & (valid_to.isna() | (today <= valid_to))
+    ].reset_index(drop=True)
     df["SOTLAS"] = "https://sotl.as/summits/" + df["SummitCode"]
     df["Activations"] = df["ActivationCount"].astype(object).map(
         lambda v: "" if pd.isna(v) else str(v)
