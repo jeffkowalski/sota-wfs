@@ -45,8 +45,8 @@ LAYERS: dict[str, Layer] = {
         Layer(
             name="Tesla_Superchargers",
             ns="sota",
-            title="Tesla Superchargers (CA)",
-            abstract="Tesla Supercharger locations in California, from the alternative fuel stations API",
+            title="Tesla Superchargers",
+            abstract="Tesla Supercharger locations, from the alternative fuel stations API",
             source=DATA_DIR / "superchargers.geojson",
             loader=nrel_geojson_loader,
         ),

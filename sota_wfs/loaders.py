@@ -62,19 +62,33 @@ def sota_csv_loader(path: Path) -> LayerData:
     return _finish(df, lons, lats, mtime)
 
 
-# Properties surfaced for each Supercharger station, in output order.
+# Properties surfaced for each Supercharger station, in output order:
+# (served name, source key in the API feature; None = derived).
 _NREL_PROPS = [
-    "station_name",
-    "street_address",
-    "city",
-    "state",
-    "zip",
-    "ev_dc_fast_num",
-    "ev_connector_types",
-    "ev_pricing",
-    "access_days_time",
-    "station_phone",
+    ("name", "station_name"),
+    ("address", None),
+    ("street", "street_address"),
+    ("city", "city"),
+    ("state", "state"),
+    ("zip", "zip"),
+    ("stalls", "ev_dc_fast_num"),
+    ("power_kw", None),
+    ("connectors", "ev_connector_types"),
+    ("pricing", "ev_pricing"),
+    ("access", "access_days_time"),
+    ("phone", "station_phone"),
 ]
+
+
+def _max_power_kw(props: dict):
+    """Highest connector power_kw across the station's charging units."""
+    best = None
+    for unit in props.get("ev_charging_units") or []:
+        for conn in (unit.get("connectors") or {}).values():
+            kw = conn.get("power_kw")
+            if kw is not None and (best is None or kw > best):
+                best = kw
+    return None if best is None else int(best)
 
 
 def nrel_geojson_loader(path: Path) -> LayerData:
@@ -91,13 +105,20 @@ def nrel_geojson_loader(path: Path) -> LayerData:
             continue
         p = feat.get("properties", {})
         row = {}
-        for k in _NREL_PROPS:
-            v = p.get(k)
+        for out, src in _NREL_PROPS:
+            if out == "power_kw":
+                v = _max_power_kw(p)
+            elif out == "address":
+                v = ", ".join(
+                    str(p[part]) for part in ("street_address", "city", "state") if p.get(part)
+                )
+            else:
+                v = p.get(src)
             if isinstance(v, list):
                 v = " ".join(str(x) for x in v)
-            row[k] = "" if v is None else v
+            row[out] = "" if v is None else v
         rows.append(row)
         lons.append(float(lon))
         lats.append(float(lat))
-    df = pd.DataFrame(rows, columns=_NREL_PROPS)
+    df = pd.DataFrame(rows, columns=[out for out, _ in _NREL_PROPS])
     return _finish(df, np.asarray(lons), np.asarray(lats), mtime)

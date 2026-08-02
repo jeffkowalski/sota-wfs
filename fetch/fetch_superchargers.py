@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download Tesla Supercharger locations (California) from the alternative
+"""Download Tesla Supercharger locations (all states) from the alternative
 fuel stations API; validate; atomically swap into place.
 
 Run weekly (systemd timer). Set NREL_API_KEY for a personal key; DEMO_KEY
@@ -15,7 +15,7 @@ from pathlib import Path
 API_KEY = os.environ.get("NREL_API_KEY", "DEMO_KEY")
 URL = (
     "https://developer.nlr.gov/api/alt-fuel-stations/v1.geojson"
-    f"?api_key={API_KEY}&fuel_type=ELEC&ev_network=Tesla&state=CA&status=E&limit=all"
+    f"?api_key={API_KEY}&fuel_type=ELEC&ev_network=Tesla&status=E&limit=all"
 )
 DATA_DIR = Path(os.environ.get("SOTA_WFS_ROOT", Path(__file__).resolve().parent.parent)) / "data"
 DEST = DATA_DIR / "superchargers.geojson"
