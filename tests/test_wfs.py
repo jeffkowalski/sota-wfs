@@ -25,7 +25,10 @@ def client(tmp_path, monkeypatch):
     data_dir.mkdir()
     (data_dir / "summitslist.csv").write_text(FIXTURE_CSV)
 
+    import sota_wfs.az as az
     import sota_wfs.registry as registry
+
+    monkeypatch.setattr(az, "COMPUTE_ENABLED", False)
 
     monkeypatch.setattr(registry, "DATA_DIR", data_dir)
     layers = {}
@@ -125,6 +128,31 @@ def test_invalid_summits_omitted(client):
     codes = {f["properties"]["SummitCode"] for f in fc["features"]}
     assert "W6/CC-067" not in codes  # retired 31/07/2012
     assert "W6/XX-999" not in codes  # not valid until 2099
+
+
+def test_az_polygon_served_only_when_zoomed_in(client, tmp_path):
+    ring = [[19.849, 42.478], [19.852, 42.478], [19.852, 42.481], [19.849, 42.478]]
+    az_dir = tmp_path / "data" / "az"
+    az_dir.mkdir()
+    (az_dir / "4O_IC-001.json").write_text(json.dumps({"ok": True, "ring": ring}))
+
+    # zoomed in (lat span 0.03): polygon rides along with the summit point
+    fc = get_json(client, CALTOPO_TEMPLATE.format(bbox="42.47,19.84,42.50,19.86"))
+    by_id = {f["id"]: f for f in fc["features"]}
+    assert fc["totalFeatures"] == 2
+    poly = by_id["SOTA_Summits.az-4O_IC-001"]
+    assert poly["geometry"]["type"] == "Polygon"
+    assert poly["properties"]["SummitName"] == "Maja Rosit AZ"
+    assert poly["properties"]["fill"] == "#FFAA00"
+
+    # zoomed out (lat span 1.0): points only
+    fc = get_json(client, CALTOPO_TEMPLATE.format(bbox="42.0,19.0,43.0,20.0"))
+    assert [f["geometry"]["type"] for f in fc["features"]] == ["Point"]
+
+    # cached failures are not served
+    (az_dir / "4O_IC-001.json").write_text(json.dumps({"ok": False, "error": "x"}))
+    fc = get_json(client, CALTOPO_TEMPLATE.format(bbox="42.47,19.84,42.50,19.86"))
+    assert fc["totalFeatures"] == 1
 
 
 def test_param_case_insensitivity_and_both_routes(client):

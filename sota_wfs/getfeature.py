@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
+from . import az
+
 from .loaders import LayerData
 from .registry import Layer
 
@@ -100,6 +102,9 @@ def select(
         )
         idx = np.flatnonzero(mask)
     matched = int(idx.size)
+    az_features = []
+    if layer.name == "SOTA_Summits" and bbox is not None:
+        az_features = az.features_for_bbox(data, idx, bbox)
     if count is not None:
         idx = idx[:count]
 
@@ -120,6 +125,9 @@ def select(
                 "bbox": [lon, lat, lon, lat],
             }
         )
+
+    features.extend(az_features)
+    matched += len(az_features)
 
     fc = {
         "type": "FeatureCollection",
