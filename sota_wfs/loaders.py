@@ -20,9 +20,19 @@ SOTA_HEADER = (
 _SOTA_INT_COLS = ["AltM", "AltFt", "Points", "BonusPoints", "ActivationCount"]
 _SOTA_FLOAT_COLS = ["GridRef1", "GridRef2", "Longitude", "Latitude"]
 
-# Marker styling (see example map QVVPKB6): summits are red numbered circles
+# Marker styling (see example map QVVPKB6): summits are numbered circles
 # keyed by their point value; Superchargers use CalTopo's charging icon.
-SOTA_MARKER_COLOR = "#FF0000"
+# Summit colors follow SOTL.as' green-to-red points scale (extracted from
+# sotlas-frontend's summit-circle-*pt.png marker images).
+SOTA_POINT_COLORS = {
+    1: "#4D7A20",
+    2: "#6DA536",
+    4: "#AEA727",
+    6: "#EFA818",
+    8: "#DC5D04",
+    10: "#C8101E",
+}
+SOTA_MARKER_COLOR = "#FF0000"  # fallback for missing/unexpected point values
 NREL_MARKER_COLOR = "#ffaa00"
 NREL_MARKER_SYMBOL = "electric-charging"
 
@@ -74,7 +84,9 @@ def sota_csv_loader(path: Path) -> LayerData:
     )
     # CalTopo's WFS renderer honors style properties served alongside the
     # data (verified empirically 2026-08: dots follow marker-color).
-    df["marker-color"] = SOTA_MARKER_COLOR
+    df["marker-color"] = df["Points"].astype(object).map(
+        lambda v: SOTA_MARKER_COLOR if pd.isna(v) else SOTA_POINT_COLORS.get(v, SOTA_MARKER_COLOR)
+    )
     df["marker-symbol"] = df["Points"].astype(object).map(
         lambda v: "point" if pd.isna(v) else f"circle-{v}"
     )

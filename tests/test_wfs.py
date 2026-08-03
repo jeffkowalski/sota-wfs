@@ -3,7 +3,7 @@ import textwrap
 
 import pytest
 
-from sota_wfs.loaders import SOTA_MARKER_COLOR
+from sota_wfs.loaders import SOTA_POINT_COLORS
 
 FIXTURE_CSV = textwrap.dedent(
     """\
@@ -78,7 +78,7 @@ def test_caltopo_getfeature_shape(client):
         "BonusPoints": 3,
         "Activations": "1",
         "SOTLAS": "https://sotl.as/summits/4O/IC-001",
-        "marker-color": SOTA_MARKER_COLOR,  # style props served even when not in PROPERTYNAME
+        "marker-color": SOTA_POINT_COLORS[10],  # served even when not in PROPERTYNAME
         "marker-symbol": "circle-10",
     }
 
