@@ -2,8 +2,8 @@
 
 AZ rings are computed with the azgen-style approach ported from
 sota-template/build_caltopo.py: a coarse SRTM AZ from api.activation.zone
-bounds a ~10 m DEM grid fetched from opentopodata, and marching squares at
-summit_alt - 25 m yields the ring containing the summit.
+bounds a ~10 m DEM grid fetched from opentopodata, and marching squares 25 m
+below the DEM local max near the summit yields the ring containing it.
 
 The elevation API is slow and rate-limited (~1 req/s, ~1000 calls/day; one
 summit costs ~30-60 calls), so rings are never computed during a request.
@@ -30,6 +30,7 @@ OPENTOPO = "https://api.opentopodata.org/v1/"
 
 AZ_COLOR = "#FFAA00"
 AZ_THRES_M = 25            # SOTA activation-zone vertical drop
+SUMMIT_SEARCH_M = 20.0     # DEM local-max search radius around official coords
 MAX_SPAN_DEG = 0.08        # serve AZs only when bbox lat span is below this (~Z14+)
 DAILY_CALL_BUDGET = 900    # opentopodata public limit is 1000 calls/day
 RETRY_FAILED_SECONDS = 7 * 86400
@@ -339,15 +340,37 @@ def _compute_az(ref: str, lat: float, lon: float, alt: float) -> list | None:
     return ring_from_grid(lat, lon, alt, node_lat, node_lon, V)
 
 
-def ring_from_grid(lat, lon, alt, node_lat, node_lon, V) -> list | None:
-    """Marching squares at the AZ cutoff; returns the closed ring containing
-    the summit (largest ring as fallback), rounded to 6 decimals."""
+def _dem_reference(lat, lon, node_lat, node_lon, V) -> float | None:
+    """Highest valid DEM node within SUMMIT_SEARCH_M of the official
+    coordinates, or None when everything nearby is nodata. Referencing the
+    DEM's local max absorbs both coordinate error and official-altitude
+    error, in either direction."""
+    mlat = 111320.0
+    mlon = 111320.0 * math.cos(math.radians(lat))
     ci = min(range(len(node_lat)), key=lambda i: abs(node_lat[i] - lat))
     cj = min(range(len(node_lon)), key=lambda j: abs(node_lon[j] - lon))
-    dem_center = V[ci][cj]
-    cutoff = alt - AZ_THRES_M
-    if alt - dem_center > AZ_THRES_M - 1:      # azgen guard: trust the DEM
-        cutoff = dem_center - AZ_THRES_M
+    ri = max(1, math.ceil(SUMMIT_SEARCH_M / ((node_lat[0] - node_lat[1]) * mlat)))
+    rj = max(1, math.ceil(SUMMIT_SEARCH_M / ((node_lon[1] - node_lon[0]) * mlon)))
+    best = None
+    for i in range(max(0, ci - ri), min(len(node_lat), ci + ri + 1)):
+        dy = (node_lat[i] - lat) * mlat
+        for j in range(max(0, cj - rj), min(len(node_lon), cj + rj + 1)):
+            dx = (node_lon[j] - lon) * mlon
+            if dx * dx + dy * dy > SUMMIT_SEARCH_M ** 2:
+                continue
+            v = V[i][j]
+            if v > -1e8 and (best is None or v > best):
+                best = v
+    return best
+
+
+def ring_from_grid(lat, lon, alt, node_lat, node_lon, V) -> list | None:
+    """Marching squares at the AZ cutoff; returns the closed ring containing
+    the summit (largest ring as fallback), rounded to 6 decimals. The cutoff
+    is 25 m below the DEM local max near the summit; the official altitude
+    is used only when the DEM has no data there."""
+    ref = _dem_reference(lat, lon, node_lat, node_lon, V)
+    cutoff = (ref if ref is not None else alt) - AZ_THRES_M
     rings = _marching_squares(node_lat, node_lon, V, cutoff)
     cont = [r for r in rings if _point_in_ring((lon, lat), r)] or rings
     if not cont:
