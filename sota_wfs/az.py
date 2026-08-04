@@ -53,7 +53,7 @@ def _cache_path(ref: str):
 
 # ---------- serving ----------
 
-def features_for_bbox(data, idx, bbox) -> list[dict]:
+def features_for_bbox(data, idx, bbox, base_url: str) -> list[dict]:
     """Styled AZ Polygon features for the summits at data.props.iloc[idx],
     when the view is zoomed in enough. Queues computation for cache misses."""
     minx, miny, maxx, maxy = bbox
@@ -67,8 +67,26 @@ def features_for_bbox(data, idx, bbox) -> list[dict]:
         if entry is None:
             _enqueue(ref, row)
         elif entry.get("ok") and entry.get("ring"):
-            feats.append(_feature(ref, row, entry["ring"]))
+            feats.append(_feature(ref, row, entry["ring"], base_url))
     return feats
+
+
+def download_geojson(ref: str, row, base_url: str) -> dict | None:
+    """Standalone FeatureCollection for one summit's cached AZ ring, or None
+    when no successful ring is cached."""
+    entry = _cached(ref)
+    if not (entry and entry.get("ok") and entry.get("ring")):
+        return None
+    feat = _feature(ref, row, entry["ring"], base_url)
+    # Name the object for importers: CalTopo reads properties.title,
+    # GDAL/QGIS read properties.name and the collection-level name.
+    name = f"{row['SummitName']} - AZ"
+    feat["properties"] = {"title": name, "name": name, **feat["properties"]}
+    return {
+        "type": "FeatureCollection",
+        "name": name,
+        "features": [feat],
+    }
 
 
 def _cached(ref: str) -> dict | None:
@@ -83,7 +101,7 @@ def _cached(ref: str) -> dict | None:
     return entry
 
 
-def _feature(ref: str, row, ring: list) -> dict:
+def _feature(ref: str, row, ring: list, base_url: str) -> dict:
     lons = [p[0] for p in ring]
     lats = [p[1] for p in ring]
     return {
@@ -94,6 +112,7 @@ def _feature(ref: str, row, ring: list) -> dict:
         "properties": {
             "SummitCode": ref,
             "SummitName": f"{row['SummitName']} AZ",
+            "GeoJSON": f"{base_url}/az/{ref.replace('/', '_')}.geojson",
             "stroke": AZ_COLOR,
             "stroke-width": 1,
             "stroke-opacity": 1,

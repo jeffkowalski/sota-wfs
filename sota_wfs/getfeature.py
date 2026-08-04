@@ -89,6 +89,7 @@ def select(
     bbox: tuple[float, float, float, float] | None,
     prop_names: list[str],
     count: int | None,
+    base_url: str,
 ) -> dict:
     if bbox is None:
         idx = np.arange(len(data.lons))
@@ -104,7 +105,7 @@ def select(
     matched = int(idx.size)
     az_features = []
     if layer.name == "SOTA_Summits" and bbox is not None:
-        az_features = az.features_for_bbox(data, idx, bbox)
+        az_features = az.features_for_bbox(data, idx, bbox, base_url)
     if count is not None:
         idx = idx[:count]
 

@@ -6,6 +6,7 @@ import json
 
 from flask import Flask, Response, request
 
+from . import az
 from .capabilities import capabilities_xml, describe_feature_type_xml, exception_xml
 from .getfeature import WfsError, parse_bbox, resolve_properties, select
 from .registry import available_layers, get_data, resolve_typename
@@ -92,8 +93,28 @@ def create_app() -> Flask:
             count = int(count_raw) if count_raw else None
         except ValueError:
             raise WfsError("InvalidParameterValue", f"Malformed count: {count_raw!r}", "count")
-        fc = select(layer, data, bbox, props, count)
+        fc = select(layer, data, bbox, props, count, _base_url())
         return Response(json.dumps(fc, separators=(",", ":")), content_type="application/json")
+
+    @app.route("/az/<ref>.geojson")
+    def az_download(ref: str) -> Response:
+        code = ref.replace("_", "/")  # SOTA refs hold exactly one slash, no underscores
+        layer = resolve_typename("SOTA_Summits")
+        try:
+            data = get_data(layer)
+        except FileNotFoundError:
+            return Response("Summit data not yet fetched", status=503, content_type="text/plain")
+        rows = data.props[data.props["SummitCode"] == code]
+        fc = az.download_geojson(code, rows.iloc[0], _base_url()) if len(rows) else None
+        if fc is None:
+            return Response(
+                f"No cached activation zone for {code}", status=404, content_type="text/plain"
+            )
+        resp = Response(
+            json.dumps(fc, separators=(",", ":")), content_type="application/geo+json"
+        )
+        resp.headers["Content-Disposition"] = f'attachment; filename="{ref}_az.geojson"'
+        return resp
 
     def _describe_feature_type(params: dict[str, str]) -> Response:
         raw = params.get("typenames") or params.get("typename")

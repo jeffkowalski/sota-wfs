@@ -144,6 +144,7 @@ def test_az_polygon_served_only_when_zoomed_in(client, tmp_path):
     assert poly["geometry"]["type"] == "Polygon"
     assert poly["properties"]["SummitName"] == "Maja Rosit AZ"
     assert poly["properties"]["fill"] == "#FFAA00"
+    assert poly["properties"]["GeoJSON"] == "http://localhost/az/4O_IC-001.geojson"
 
     # zoomed out (lat span 1.0): points only
     fc = get_json(client, CALTOPO_TEMPLATE.format(bbox="42.0,19.0,43.0,20.0"))
@@ -153,6 +154,29 @@ def test_az_polygon_served_only_when_zoomed_in(client, tmp_path):
     (az_dir / "4O_IC-001.json").write_text(json.dumps({"ok": False, "error": "x"}))
     fc = get_json(client, CALTOPO_TEMPLATE.format(bbox="42.47,19.84,42.50,19.86"))
     assert fc["totalFeatures"] == 1
+
+
+def test_az_geojson_download(client, tmp_path):
+    ring = [[19.849, 42.478], [19.852, 42.478], [19.852, 42.481], [19.849, 42.478]]
+    az_dir = tmp_path / "data" / "az"
+    az_dir.mkdir()
+    (az_dir / "4O_IC-001.json").write_text(json.dumps({"ok": True, "ring": ring}))
+
+    resp = client.get("/az/4O_IC-001.geojson")
+    assert resp.status_code == 200
+    assert resp.content_type == "application/geo+json"
+    assert 'filename="4O_IC-001_az.geojson"' in resp.headers["Content-Disposition"]
+    fc = json.loads(resp.data)
+    assert fc["name"] == "Maja Rosit - AZ"
+    feat = fc["features"][0]
+    assert feat["geometry"]["coordinates"] == [ring]
+    assert feat["properties"]["title"] == "Maja Rosit - AZ"
+    assert feat["properties"]["name"] == "Maja Rosit - AZ"
+    assert feat["properties"]["SummitName"] == "Maja Rosit AZ"
+
+    # unknown summit and uncached AZ both 404
+    assert client.get("/az/ZZ_XX-000.geojson").status_code == 404
+    assert client.get("/az/W6_NC-001.geojson").status_code == 404
 
 
 def test_param_case_insensitivity_and_both_routes(client):
