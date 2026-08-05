@@ -78,6 +78,7 @@ def test_caltopo_getfeature_shape(client):
         "BonusPoints": 3,
         "Activations": "1",
         "SOTLAS": "https://sotl.as/summits/4O/IC-001",
+        "title": "Maja Rosit",  # served even when not in PROPERTYNAME
         "marker-color": SOTA_POINT_COLORS[10],  # served even when not in PROPERTYNAME
         "marker-symbol": "circle-10",
         "GeoJSON": "http://localhost/summit/4O_IC-001.geojson",
@@ -87,7 +88,7 @@ def test_caltopo_getfeature_shape(client):
 def test_all_properties_and_types(client):
     fc = get_json(client, CALTOPO_TEMPLATE.format(bbox="42.47,19.84,42.50,19.86"))
     props = fc["features"][0]["properties"]
-    assert len(props) == 22  # 17 CSV + SOTLAS, Activations, marker-color, marker-symbol, GeoJSON
+    assert len(props) == 23  # 17 CSV + title, SOTLAS, Activations, marker-color, marker-symbol, GeoJSON
     assert props["AltM"] == 2524          # int
     assert props["GridRef1"] == 19.8505   # float
     assert props["Activations"] == "1"    # string (the CAST parity)

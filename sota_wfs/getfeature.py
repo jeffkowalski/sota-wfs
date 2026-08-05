@@ -48,9 +48,10 @@ def parse_bbox(raw: str) -> tuple[float, float, float, float]:
     return minx, miny, maxx, maxy
 
 
-# Style-hint columns are served even when PROPERTYNAME omits them, so
-# CalTopo's saved layer templates don't have to change to pick them up.
-_ALWAYS_SERVED = ("marker-color", "marker-symbol")
+# Columns served even when PROPERTYNAME omits them, so CalTopo's saved
+# layer templates don't have to change to pick them up: style hints, and
+# "title" (CalTopo's default feature label when Label Name is unset).
+_ALWAYS_SERVED = ("title", "marker-color", "marker-symbol")
 
 
 def resolve_properties(data: LayerData, raw: str | None) -> list[str]:

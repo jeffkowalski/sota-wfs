@@ -78,6 +78,9 @@ def sota_csv_loader(path: Path) -> LayerData:
         (valid_from.isna() | (valid_from <= today))
         & (valid_to.isna() | (today <= valid_to))
     ].reset_index(drop=True)
+    # CalTopo labels features with the "title" property when the layer's
+    # Label Name is unset (e.g. straight from Auto-Configure).
+    df["title"] = df["SummitName"]
     df["SOTLAS"] = "https://sotl.as/summits/" + df["SummitCode"]
     df["Activations"] = df["ActivationCount"].astype(object).map(
         lambda v: "" if pd.isna(v) else str(v)
@@ -97,8 +100,9 @@ def sota_csv_loader(path: Path) -> LayerData:
 
 # Properties surfaced for each Supercharger station, in output order:
 # (served name, source key in the API feature; None = derived).
+# "title" doubles as CalTopo's default feature label.
 _NREL_PROPS = [
-    ("name", "station_name"),
+    ("title", "station_name"),
     ("address", None),
     ("street", "street_address"),
     ("city", "city"),
