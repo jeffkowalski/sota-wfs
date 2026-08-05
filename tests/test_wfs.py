@@ -80,13 +80,14 @@ def test_caltopo_getfeature_shape(client):
         "SOTLAS": "https://sotl.as/summits/4O/IC-001",
         "marker-color": SOTA_POINT_COLORS[10],  # served even when not in PROPERTYNAME
         "marker-symbol": "circle-10",
+        "GeoJSON": "http://localhost/summit/4O_IC-001.geojson",
     }
 
 
 def test_all_properties_and_types(client):
     fc = get_json(client, CALTOPO_TEMPLATE.format(bbox="42.47,19.84,42.50,19.86"))
     props = fc["features"][0]["properties"]
-    assert len(props) == 21  # 17 CSV + SOTLAS, Activations, marker-color, marker-symbol
+    assert len(props) == 22  # 17 CSV + SOTLAS, Activations, marker-color, marker-symbol, GeoJSON
     assert props["AltM"] == 2524          # int
     assert props["GridRef1"] == 19.8505   # float
     assert props["Activations"] == "1"    # string (the CAST parity)
@@ -177,6 +178,25 @@ def test_az_geojson_download(client, tmp_path):
     # unknown summit and uncached AZ both 404
     assert client.get("/az/ZZ_XX-000.geojson").status_code == 404
     assert client.get("/az/W6_NC-001.geojson").status_code == 404
+
+
+def test_summit_geojson_download(client):
+    resp = client.get("/summit/4O_IC-001.geojson")
+    assert resp.status_code == 200
+    assert resp.content_type == "application/geo+json"
+    assert 'filename="4O_IC-001_summit.geojson"' in resp.headers["Content-Disposition"]
+    fc = json.loads(resp.data)
+    assert fc["name"] == "Maja Rosit"
+    feat = fc["features"][0]
+    assert feat["geometry"]["coordinates"] == [19.8505, 42.4795]
+    assert feat["properties"]["title"] == "Maja Rosit"
+    assert feat["properties"]["name"] == "Maja Rosit"
+    assert feat["properties"]["SummitCode"] == "4O/IC-001"
+    assert feat["properties"]["marker-symbol"] == "circle-10"
+    assert feat["properties"]["GeoJSON"] == "http://localhost/summit/4O_IC-001.geojson"
+
+    # unknown summit 404s
+    assert client.get("/summit/ZZ_XX-000.geojson").status_code == 404
 
 
 def test_param_case_insensitivity_and_both_routes(client):

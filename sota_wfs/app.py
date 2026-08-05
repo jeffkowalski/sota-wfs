@@ -8,7 +8,7 @@ from flask import Flask, Response, request
 
 from . import az
 from .capabilities import capabilities_xml, describe_feature_type_xml, exception_xml
-from .getfeature import WfsError, parse_bbox, resolve_properties, select
+from .getfeature import WfsError, parse_bbox, resolve_properties, select, summit_geojson
 from .registry import available_layers, get_data, resolve_typename
 
 XML = "text/xml"
@@ -114,6 +114,23 @@ def create_app() -> Flask:
             json.dumps(fc, separators=(",", ":")), content_type="application/geo+json"
         )
         resp.headers["Content-Disposition"] = f'attachment; filename="{ref}_az.geojson"'
+        return resp
+
+    @app.route("/summit/<ref>.geojson")
+    def summit_download(ref: str) -> Response:
+        code = ref.replace("_", "/")  # SOTA refs hold exactly one slash, no underscores
+        layer = resolve_typename("SOTA_Summits")
+        try:
+            data = get_data(layer)
+        except FileNotFoundError:
+            return Response("Summit data not yet fetched", status=503, content_type="text/plain")
+        fc = summit_geojson(data, code, _base_url())
+        if fc is None:
+            return Response(f"No summit {code}", status=404, content_type="text/plain")
+        resp = Response(
+            json.dumps(fc, separators=(",", ":")), content_type="application/geo+json"
+        )
+        resp.headers["Content-Disposition"] = f'attachment; filename="{ref}_summit.geojson"'
         return resp
 
     def _describe_feature_type(params: dict[str, str]) -> Response:

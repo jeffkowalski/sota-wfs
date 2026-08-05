@@ -83,6 +83,42 @@ def _json_value(v):
     return v
 
 
+def _summit_url(code: str, base_url: str) -> str:
+    return f"{base_url}/summit/{code.replace('/', '_')}.geojson"
+
+
+def summit_geojson(data: LayerData, code: str, base_url: str) -> dict | None:
+    """Standalone FeatureCollection for one summit's marker point, or None
+    when the summit code is unknown."""
+    hits = np.flatnonzero(data.props["SummitCode"] == code)
+    if not hits.size:
+        return None
+    fid = int(hits[0])
+    lon = float(np.round(data.lons[fid], COORD_DECIMALS))
+    lat = float(np.round(data.lats[fid], COORD_DECIMALS))
+    rec = data.props.iloc[fid]
+    # Name the object for importers: CalTopo reads properties.title,
+    # GDAL/QGIS read properties.name and the collection-level name.
+    name = rec["SummitName"]
+    props = {"title": name, "name": name}
+    props.update({k: _json_value(v) for k, v in rec.items()})
+    props["GeoJSON"] = _summit_url(code, base_url)
+    return {
+        "type": "FeatureCollection",
+        "name": name,
+        "features": [
+            {
+                "type": "Feature",
+                "id": f"SOTA_Summits.{fid + 1}",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "geometry_name": "the_geom",
+                "properties": props,
+                "bbox": [lon, lat, lon, lat],
+            }
+        ],
+    }
+
+
 def select(
     layer: Layer,
     data: LayerData,
@@ -116,13 +152,16 @@ def select(
     features = []
     for i, (fid, lon, lat, rec) in enumerate(zip(idx, lons, lats, records)):
         lon, lat = float(lon), float(lat)
+        props = {k: _json_value(rec[k]) for k in prop_names}
+        if layer.name == "SOTA_Summits":
+            props["GeoJSON"] = _summit_url(rec["SummitCode"], base_url)
         features.append(
             {
                 "type": "Feature",
                 "id": f"{layer.name}.{int(fid) + 1}",
                 "geometry": {"type": "Point", "coordinates": [lon, lat]},
                 "geometry_name": "the_geom",
-                "properties": {k: _json_value(rec[k]) for k in prop_names},
+                "properties": props,
                 "bbox": [lon, lat, lon, lat],
             }
         )
