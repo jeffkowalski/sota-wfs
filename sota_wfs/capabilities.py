@@ -30,15 +30,29 @@ def capabilities_xml(version: str, layers: list[Layer], base_url: str) -> str:
 
 def _operations_metadata(base_url: str, version: str) -> str:
     href = escape(f"{base_url}/geoserver/wfs", {'"': "&quot;"})
-    formats = "".join(f"<ows:Value>{escape(f)}</ows:Value>" for f in _OUTPUT_FORMATS)
-    versions = "<ows:Value>1.1.0</ows:Value><ows:Value>2.0.0</ows:Value>"
+    # OWS 1.0 (WFS 1.1.0) puts ows:Value directly inside ows:Parameter; the
+    # ows:AllowedValues wrapper only exists in OWS 1.1 (WFS 2.0.0). CalTopo's
+    # auto-configure parses the 1.1.0 document and rejects wrapped values.
+    ows10 = version.startswith("1")
+
+    def param(name: str, values: list[str]) -> str:
+        vals = "".join(f"<ows:Value>{escape(v)}</ows:Value>" for v in values)
+        if not ows10:
+            vals = f"<ows:AllowedValues>{vals}</ows:AllowedValues>"
+        return f'<ows:Parameter name="{name}">{vals}</ows:Parameter>'
+
     ops = []
     for op in ("GetCapabilities", "DescribeFeatureType", "GetFeature"):
         params = []
         if op == "GetCapabilities":
-            params.append(f'<ows:Parameter name="AcceptVersions"><ows:AllowedValues>{versions}</ows:AllowedValues></ows:Parameter>')
+            params.append(param("AcceptVersions", ["1.1.0", "2.0.0"]))
         else:
-            params.append(f'<ows:Parameter name="outputFormat"><ows:AllowedValues>{formats}</ows:AllowedValues></ows:Parameter>')
+            if op == "GetFeature":
+                # CalTopo's auto-configure reads GetFeature's parameters
+                # positionally and needs outputFormat second, as GeoServer
+                # serves it (resultType first).
+                params.append(param("resultType", ["results", "hits"]))
+            params.append(param("outputFormat", _OUTPUT_FORMATS))
         ops.append(
             f'<ows:Operation name="{op}">'
             f"<ows:DCP><ows:HTTP>"
