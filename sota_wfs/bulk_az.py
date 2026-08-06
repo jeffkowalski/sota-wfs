@@ -10,7 +10,10 @@ summits with an ok cache entry are skipped, cached failures are retried.
 
 Instead of asking api.activation.zone for a coarse bbox per summit (22k
 requests to a free service), the grid starts at a 500 m half-width and
-doubles whenever the ring touches the grid edge, capped at 4 km.
+doubles whenever the ring touches the grid edge (or no contour closes),
+capped at 16 km. Only flat-country summits ever widen past 4 km, so the
+big grids stay rare. A summit whose AZ still won't close at the cap is
+cached as a failure rather than a clipped polygon.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from . import az, registry
 from .dem import Dem, TileMissing
 
 START_HALF_M = 500.0
-MAX_HALF_M = 4000.0
+MAX_HALF_M = 16000.0
 
 _tls = threading.local()
 
@@ -48,7 +51,10 @@ def compute_one(ref: str, lat: float, lon: float, alt: float) -> dict:
             if half >= MAX_HALF_M or (ring and not _touches_edge(ring, node_lat, node_lon)):
                 break
             half *= 2  # AZ ran off the grid (or no contour closed): widen
-        return {"ok": ring is not None, "ring": ring, "src": "3dep13"}
+        if ring is None:
+            return {"ok": False, "src": "3dep13",
+                    "error": f"no closed ring within {MAX_HALF_M / 1000:g} km grid"}
+        return {"ok": True, "ring": ring, "src": "3dep13"}
     except Exception as exc:  # noqa: BLE001 - cache the failure and continue
         return {"ok": False, "error": str(exc), "src": "3dep13"}
 

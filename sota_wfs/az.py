@@ -394,7 +394,14 @@ def ring_from_grid(lat, lon, alt, node_lat, node_lon, V) -> list | None:
     cont = [r for r in rings if _point_in_ring((lon, lat), r)] or rings
     if not cont:
         return None
-    ring = [[round(x, 6), round(y, 6)] for x, y in max(cont, key=len)]
+    best = max(cont, key=len)
+    # An open contour means the AZ ran off the grid (or the trace broke);
+    # closing it with a chord fabricates a straight edge that can even
+    # self-intersect. Refuse, so callers widen the grid or report failure.
+    if abs(best[0][0] - best[-1][0]) > 3 * (node_lon[1] - node_lon[0]) or \
+       abs(best[0][1] - best[-1][1]) > 3 * (node_lat[0] - node_lat[1]):
+        return None
+    ring = [[round(x, 6), round(y, 6)] for x, y in best]
     if ring[0] != ring[-1]:
         ring.append(ring[0])
     return ring
