@@ -31,9 +31,9 @@ OPENTOPO = "https://api.opentopodata.org/v1/"
 AZ_COLOR = "#FFAA00"
 AZ_THRES_M = 25            # SOTA activation-zone vertical drop
 SUMMIT_SEARCH_M = 20.0     # DEM local-max search radius around official coords
-MAX_SPAN_DEG = 0.3         # serve AZs only when bbox lat span is below this (~Z13+;
+MAX_SPAN_DEG = 0.4         # serve AZs only when bbox lat span is below this (~Z13+;
                            # wide enough to show the largest flatland AZs whole,
-                           # e.g. W8O/SW-012 spans 0.17 deg of latitude)
+                           # e.g. W5T/ST-043 spans 0.30 deg of latitude)
 DAILY_CALL_BUDGET = 900    # opentopodata public limit is 1000 calls/day
 RETRY_FAILED_SECONDS = 7 * 86400
 
