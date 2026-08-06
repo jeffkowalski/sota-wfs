@@ -361,11 +361,17 @@ def _compute_az(ref: str, lat: float, lon: float, alt: float) -> list | None:
     return ring_from_grid(lat, lon, alt, node_lat, node_lon, V)
 
 
-def _dem_reference(lat, lon, node_lat, node_lon, V) -> float | None:
-    """Highest valid DEM node within SUMMIT_SEARCH_M of the official
-    coordinates, or None when everything nearby is nodata. Referencing the
-    DEM's local max absorbs both coordinate error and official-altitude
-    error, in either direction."""
+def _dem_reference(lat, lon, node_lat, node_lon, V):
+    """DEM node the AZ cutoff references: the highest valid node within
+    SUMMIT_SEARCH_M of the official coordinates, then a monotone uphill
+    walk from there to the local max. Returns (i, j) or None when
+    everything nearby is nodata.
+
+    The nearby search absorbs small coordinate/altitude error; the walk
+    absorbs official coordinates that miss the summit by hundreds of
+    meters (mid-slope points read 25+ m low, so the cutoff swept whole
+    valleys). Being monotone, the walk cannot cross a saddle onto a
+    neighboring higher mountain — it stops at the summit's own top."""
     mlat = 111320.0
     mlon = 111320.0 * math.cos(math.radians(lat))
     ci = min(range(len(node_lat)), key=lambda i: abs(node_lat[i] - lat))
@@ -380,20 +386,43 @@ def _dem_reference(lat, lon, node_lat, node_lon, V) -> float | None:
             if dx * dx + dy * dy > SUMMIT_SEARCH_M ** 2:
                 continue
             v = V[i][j]
-            if v > -1e8 and (best is None or v > best):
-                best = v
-    return best
+            if v > -1e8 and (best is None or v > V[best[0]][best[1]]):
+                best = (i, j)
+    return None if best is None else _ascend(best[0], best[1], V)
+
+
+def _ascend(i, j, V):
+    """Walk uphill through 8-neighbors until no neighbor is higher."""
+    ni, nj = len(V), len(V[0])
+    while True:
+        cur = V[i][j]
+        bi, bj = i, j
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                y, x = i + di, j + dj
+                if 0 <= y < ni and 0 <= x < nj and V[y][x] > V[bi][bj]:
+                    bi, bj = y, x
+        if V[bi][bj] <= cur:
+            return i, j
+        i, j = bi, bj
 
 
 def ring_from_grid(lat, lon, alt, node_lat, node_lon, V) -> list | None:
     """Marching squares at the AZ cutoff; returns the closed ring containing
     the summit (largest ring as fallback), rounded to 6 decimals. The cutoff
-    is 25 m below the DEM local max near the summit; the official altitude
-    is used only when the DEM has no data there."""
-    ref = _dem_reference(lat, lon, node_lat, node_lon, V)
-    cutoff = (ref if ref is not None else alt) - AZ_THRES_M
+    is 25 m below the DEM local max uphill of the summit (see
+    _dem_reference); the official coordinates and altitude are used only
+    when the DEM has no data there."""
+    top = _dem_reference(lat, lon, node_lat, node_lon, V)
+    if top is None:
+        cutoff = alt - AZ_THRES_M
+        top_pt = (lon, lat)
+    else:
+        i, j = top
+        cutoff = V[i][j] - AZ_THRES_M
+        top_pt = (node_lon[j], node_lat[i])
     rings = _marching_squares(node_lat, node_lon, V, cutoff)
-    cont = [r for r in rings if _point_in_ring((lon, lat), r)] or rings
+    cont = [r for r in rings if _point_in_ring(top_pt, r)] or rings
     if not cont:
         return None
     best = max(cont, key=len)
