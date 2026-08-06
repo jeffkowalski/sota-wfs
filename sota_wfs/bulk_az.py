@@ -11,9 +11,10 @@ summits with an ok cache entry are skipped, cached failures are retried.
 Instead of asking api.activation.zone for a coarse bbox per summit (22k
 requests to a free service), the grid starts at a 500 m half-width and
 doubles whenever the ring touches the grid edge (or no contour closes),
-capped at 16 km. Only flat-country summits ever widen past 4 km, so the
-big grids stay rare. A summit whose AZ still won't close at the cap is
-cached as a failure rather than a clipped polygon.
+capped at 32 km (W5T/ST-043's ring runs 27 km south of its summit). Only
+flat-country summits ever widen past 4 km, so the big grids stay rare. A
+summit whose AZ still won't close at the cap is cached as a failure
+rather than a clipped polygon.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from . import az, registry
 from .dem import Dem, TileMissing
 
 START_HALF_M = 500.0
-MAX_HALF_M = 16000.0
+MAX_HALF_M = 32000.0
 
 _tls = threading.local()
 
