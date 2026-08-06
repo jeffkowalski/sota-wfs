@@ -15,7 +15,10 @@ GeoPackage, no GDAL, no Java, no docker.
 - `serve.py` — WFS server on port 8080 (waitress; trusts ngrok's
   `X-Forwarded-*` headers so capabilities URLs come out as https).
 - `fetch/fetch_sota.py` — downloads <https://storage.sota.org.uk/summitslist.csv>,
-  validates it, atomically swaps it into `data/`. Daily systemd timer.
+  validates it, atomically swaps it into the data dir. Daily systemd timer.
+- Data (fetched datasets, AZ ring cache) lives in `~/.local/share/sota-wfs`
+  (`$XDG_DATA_HOME` respected, `$SOTA_WFS_DATA` overrides) — outside the
+  repo so workspace syncing doesn't ship 31k cache files to other devices.
 - `fetch/fetch_superchargers.py` — downloads Tesla Supercharger locations
   (all US states) from the alt-fuel-stations API at `developer.nlr.gov`.
   Weekly systemd timer. Set `NREL_API_KEY` in `.env` for a personal key

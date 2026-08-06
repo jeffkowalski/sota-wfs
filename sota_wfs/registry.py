@@ -11,8 +11,15 @@ from typing import Callable
 
 from .loaders import LayerData, nrel_geojson_loader, sota_csv_loader
 
-ROOT_DIR = Path(os.environ.get("SOTA_WFS_ROOT", Path(__file__).resolve().parent.parent))
-DATA_DIR = ROOT_DIR / "data"
+# Fetched datasets and the AZ ring cache live outside the repo: the
+# workspace tree is synced across devices (Syncthing), and 31k cache files
+# don't belong on a phone. $SOTA_WFS_DATA overrides; the default follows
+# the XDG base-directory spec.
+DATA_DIR = Path(
+    os.environ.get("SOTA_WFS_DATA")
+    or Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    / "sota-wfs"
+)
 
 RELOAD_CHECK_SECONDS = 15
 

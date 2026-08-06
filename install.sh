@@ -15,9 +15,10 @@ fi
 "$REPO/.venv/bin/pip" install --quiet --upgrade pip
 "$REPO/.venv/bin/pip" install --quiet -e "$REPO"
 
-echo "==> Initial data fetch (skipped if data already present)"
-[ -f "$REPO/data/summitslist.csv" ]      || "$REPO/.venv/bin/python" "$REPO/fetch/fetch_sota.py"
-[ -f "$REPO/data/superchargers.geojson" ] || "$REPO/.venv/bin/python" "$REPO/fetch/fetch_superchargers.py"
+DATA="${SOTA_WFS_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/sota-wfs}"
+echo "==> Initial data fetch into $DATA (skipped if data already present)"
+[ -f "$DATA/summitslist.csv" ]      || "$REPO/.venv/bin/python" "$REPO/fetch/fetch_sota.py"
+[ -f "$DATA/superchargers.geojson" ] || "$REPO/.venv/bin/python" "$REPO/fetch/fetch_superchargers.py"
 
 echo "==> Installing systemd user units"
 NGROK_BIN="$(command -v ngrok || echo /usr/local/bin/ngrok)"

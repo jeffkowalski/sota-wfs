@@ -17,7 +17,12 @@ URL = (
     "https://developer.nlr.gov/api/alt-fuel-stations/v1.geojson"
     f"?api_key={API_KEY}&fuel_type=ELEC&ev_network=Tesla&status=E&limit=all"
 )
-DATA_DIR = Path(os.environ.get("SOTA_WFS_ROOT", Path(__file__).resolve().parent.parent)) / "data"
+# Keep in sync with sota_wfs.registry.DATA_DIR (standalone script, no import).
+DATA_DIR = Path(
+    os.environ.get("SOTA_WFS_DATA")
+    or Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    / "sota-wfs"
+)
 DEST = DATA_DIR / "superchargers.geojson"
 
 MIN_FEATURES = 50
