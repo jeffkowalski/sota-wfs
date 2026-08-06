@@ -112,6 +112,8 @@ def _feature(ref: str, row, ring: list, base_url: str) -> dict:
         "geometry": {"type": "Polygon", "coordinates": [ring]},
         "geometry_name": "the_geom",
         "properties": {
+            # CalTopo's default label when the layer's Label Name is unset
+            "title": f"{row['SummitName']} - AZ",
             "SummitCode": ref,
             "SummitName": f"{row['SummitName']} AZ",
             "GeoJSON": f"{base_url}/az/{ref.replace('/', '_')}.geojson",
