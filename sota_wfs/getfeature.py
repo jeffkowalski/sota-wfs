@@ -88,6 +88,42 @@ def _summit_url(code: str, base_url: str) -> str:
     return f"{base_url}/summit/{code.replace('/', '_')}.geojson"
 
 
+def _supercharger_url(sid, base_url: str) -> str:
+    return f"{base_url}/supercharger/{sid}.geojson"
+
+
+def supercharger_geojson(data: LayerData, sid: str, base_url: str) -> dict | None:
+    """Standalone FeatureCollection for one Supercharger's marker point, or
+    None when the station id is unknown."""
+    hits = np.flatnonzero(data.props["id"].astype(str) == sid)
+    if not hits.size:
+        return None
+    fid = int(hits[0])
+    lon = float(np.round(data.lons[fid], COORD_DECIMALS))
+    lat = float(np.round(data.lats[fid], COORD_DECIMALS))
+    rec = data.props.iloc[fid]
+    # Name the object for importers: CalTopo reads properties.title,
+    # GDAL/QGIS read properties.name and the collection-level name.
+    name = rec["title"]
+    props = {"title": name, "name": name}
+    props.update({k: _json_value(v) for k, v in rec.items()})
+    props["GeoJSON"] = _supercharger_url(sid, base_url)
+    return {
+        "type": "FeatureCollection",
+        "name": name,
+        "features": [
+            {
+                "type": "Feature",
+                "id": f"Tesla_Superchargers.{fid + 1}",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "geometry_name": "the_geom",
+                "properties": props,
+                "bbox": [lon, lat, lon, lat],
+            }
+        ],
+    }
+
+
 def summit_geojson(data: LayerData, code: str, base_url: str) -> dict | None:
     """Standalone FeatureCollection for one summit's marker point, or None
     when the summit code is unknown."""
@@ -156,6 +192,8 @@ def select(
         props = {k: _json_value(rec[k]) for k in prop_names}
         if layer.name == "SOTA_Summits":
             props["GeoJSON"] = _summit_url(rec["SummitCode"], base_url)
+        elif layer.name == "Tesla_Superchargers":
+            props["GeoJSON"] = _supercharger_url(rec["id"], base_url)
         features.append(
             {
                 "type": "Feature",

@@ -19,6 +19,31 @@ FIXTURE_CSV = textwrap.dedent(
 )
 
 
+FIXTURE_SUPERCHARGERS = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [-120.1853, 39.3274]},
+            "properties": {
+                "id": 150544,
+                "station_name": "Truckee, CA - Supercharger",
+                "street_address": "11290 Donner Pass Rd",
+                "city": "Truckee",
+                "state": "CA",
+                "zip": "96161",
+                "ev_dc_fast_num": 12,
+                "ev_connector_types": ["TESLA"],
+                "ev_pricing": "$0.36/kWh",
+                "access_days_time": "24 hours daily",
+                "station_phone": "877-798-3752",
+                "ev_charging_units": [{"connectors": {"tesla": {"power_kw": 250}}}],
+            },
+        }
+    ],
+}
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
@@ -198,6 +223,39 @@ def test_summit_geojson_download(client):
 
     # unknown summit 404s
     assert client.get("/summit/ZZ_XX-000.geojson").status_code == 404
+
+
+def test_supercharger_getfeature_has_geojson(client, tmp_path):
+    (tmp_path / "data" / "superchargers.geojson").write_text(json.dumps(FIXTURE_SUPERCHARGERS))
+    fc = get_json(
+        client,
+        "/geoserver/wfs?service=WFS&request=GetFeature&typename=sota:Tesla_Superchargers",
+    )
+    assert fc["totalFeatures"] == 1
+    props = fc["features"][0]["properties"]
+    assert props["id"] == 150544
+    assert props["title"] == "Truckee, CA - Supercharger"
+    assert props["power_kw"] == 250
+    assert props["GeoJSON"] == "http://localhost/supercharger/150544.geojson"
+
+
+def test_supercharger_geojson_download(client, tmp_path):
+    (tmp_path / "data" / "superchargers.geojson").write_text(json.dumps(FIXTURE_SUPERCHARGERS))
+    resp = client.get("/supercharger/150544.geojson")
+    assert resp.status_code == 200
+    assert resp.content_type == "application/geo+json"
+    assert 'filename="150544_supercharger.geojson"' in resp.headers["Content-Disposition"]
+    fc = json.loads(resp.data)
+    assert fc["name"] == "Truckee, CA - Supercharger"
+    feat = fc["features"][0]
+    assert feat["geometry"]["coordinates"] == [-120.1853, 39.3274]
+    assert feat["properties"]["title"] == "Truckee, CA - Supercharger"
+    assert feat["properties"]["name"] == "Truckee, CA - Supercharger"
+    assert feat["properties"]["marker-symbol"] == "electric-charging"
+    assert feat["properties"]["GeoJSON"] == "http://localhost/supercharger/150544.geojson"
+
+    # unknown station 404s
+    assert client.get("/supercharger/999999.geojson").status_code == 404
 
 
 def test_param_case_insensitivity_and_both_routes(client):

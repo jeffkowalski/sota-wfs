@@ -100,9 +100,11 @@ def sota_csv_loader(path: Path) -> LayerData:
 
 # Properties surfaced for each Supercharger station, in output order:
 # (served name, source key in the API feature; None = derived).
-# "title" doubles as CalTopo's default feature label.
+# "title" doubles as CalTopo's default feature label; "id" is the NREL
+# station id, which keys the per-station /supercharger/<id>.geojson URL.
 _NREL_PROPS = [
     ("title", "station_name"),
+    ("id", "id"),
     ("address", None),
     ("street", "street_address"),
     ("city", "city"),

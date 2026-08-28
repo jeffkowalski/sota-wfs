@@ -8,7 +8,14 @@ from flask import Flask, Response, request
 
 from . import az
 from .capabilities import capabilities_xml, describe_feature_type_xml, exception_xml
-from .getfeature import WfsError, parse_bbox, resolve_properties, select, summit_geojson
+from .getfeature import (
+    WfsError,
+    parse_bbox,
+    resolve_properties,
+    select,
+    summit_geojson,
+    supercharger_geojson,
+)
 from .registry import available_layers, get_data, resolve_typename
 
 XML = "text/xml"
@@ -131,6 +138,24 @@ def create_app() -> Flask:
             json.dumps(fc, separators=(",", ":")), content_type="application/geo+json"
         )
         resp.headers["Content-Disposition"] = f'attachment; filename="{ref}_summit.geojson"'
+        return resp
+
+    @app.route("/supercharger/<sid>.geojson")
+    def supercharger_download(sid: str) -> Response:
+        layer = resolve_typename("Tesla_Superchargers")
+        try:
+            data = get_data(layer)
+        except FileNotFoundError:
+            return Response(
+                "Supercharger data not yet fetched", status=503, content_type="text/plain"
+            )
+        fc = supercharger_geojson(data, sid, _base_url())
+        if fc is None:
+            return Response(f"No supercharger {sid}", status=404, content_type="text/plain")
+        resp = Response(
+            json.dumps(fc, separators=(",", ":")), content_type="application/geo+json"
+        )
+        resp.headers["Content-Disposition"] = f'attachment; filename="{sid}_supercharger.geojson"'
         return resp
 
     def _describe_feature_type(params: dict[str, str]) -> Response:
