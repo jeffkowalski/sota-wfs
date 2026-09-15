@@ -35,6 +35,13 @@ SOTA_POINT_COLORS = {
 SOTA_MARKER_COLOR = "#FF0000"  # fallback for missing/unexpected point values
 NREL_MARKER_COLOR = "#ffaa00"
 NREL_MARKER_SYMBOL = "electric-charging"
+# recreation.gov camping: campgrounds get CalTopo's "Tent" icon (symbol code
+# "camping", from the symbol table in caltopo.com/static/js/main.js) in forest
+# green; dispersed "Camping area" records get the "Campfire" icon in sienna.
+CAMPING_MARKERS = {
+    "Campground": ("#2E7D32", "camping"),
+    "Camping area": ("#A0522D", "campfire"),
+}
 
 
 @dataclass
@@ -162,4 +169,34 @@ def nrel_geojson_loader(path: Path) -> LayerData:
     df = pd.DataFrame(rows, columns=[out for out, _ in _NREL_PROPS])
     df["marker-color"] = NREL_MARKER_COLOR
     df["marker-symbol"] = NREL_MARKER_SYMBOL
+    return _finish(df, np.asarray(lons), np.asarray(lats), mtime)
+
+
+def campground_geojson_loader(path: Path) -> LayerData:
+    """Load the flat FeatureCollection written by fetch_campgrounds.py:
+    properties are served as-is (already summarized per campground); marker
+    style follows the "kind" property."""
+    mtime = path.stat().st_mtime
+    with open(path) as f:
+        fc = json.load(f)
+    rows, lons, lats = [], [], []
+    for feat in fc.get("features", []):
+        geom = feat.get("geometry") or {}
+        if geom.get("type") != "Point":
+            continue
+        lon, lat = geom["coordinates"][:2]
+        rows.append(feat.get("properties", {}))
+        lons.append(float(lon))
+        lats.append(float(lat))
+    df = pd.DataFrame(rows)
+    # Nullable ints keep JSON output integral even when some rows are null
+    # (plain int columns with NaN would be promoted to float).
+    for col in ("id", "sites", "max_vehicle_len"):
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+    styles = df["kind"].map(CAMPING_MARKERS)
+    if styles.isna().any():
+        raise ValueError(f"Unknown camping kind(s): {sorted(df.loc[styles.isna(), 'kind'].unique())}")
+    df["marker-color"] = styles.map(lambda s: s[0])
+    df["marker-symbol"] = styles.map(lambda s: s[1])
     return _finish(df, np.asarray(lons), np.asarray(lats), mtime)

@@ -44,6 +44,50 @@ FIXTURE_SUPERCHARGERS = {
 }
 
 
+FIXTURE_CAMPGROUNDS = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [-119.565, 37.7376]},
+            "properties": {
+                "title": "UPPER PINES",
+                "id": 232447,
+                "kind": "Campground",
+                "rec_gov": "https://www.recreation.gov/camping/campgrounds/232447",
+                "reservable": "Yes",
+                "sites": 3,
+                "site_types": "Standard nonelectric 2, Tent only nonelectric 1",
+                "access": "Drive-in, Walk-in",
+                "hookups": "",
+                "allows_pets": "Yes",
+                "allows_fires": "No",
+                "max_vehicle_len": 40,
+                "activities": "Camping, Hiking",
+                "stay_limit": "14 days",
+                "fees": "$36 per night",
+                "overview": "Upper Pines is open year-round.",
+                "facilities": "Vault toilets and drinking water.",
+                "phone": "209-372-0200",
+            },
+        },
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [-120.391158, 39.502664]},
+            "properties": {
+                "title": "Lake of the Woods",
+                "id": 249926,
+                "kind": "Camping area",
+                "rec_gov": "https://www.recreation.gov/gateways/1077",
+                "reservable": "No",
+                "sites": 0,
+                "overview": "A nice small lake.",
+            },
+        },
+    ],
+}
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
@@ -256,6 +300,52 @@ def test_supercharger_geojson_download(client, tmp_path):
 
     # unknown station 404s
     assert client.get("/supercharger/999999.geojson").status_code == 404
+
+
+def test_campground_getfeature(client, tmp_path):
+    (tmp_path / "data" / "campgrounds.geojson").write_text(json.dumps(FIXTURE_CAMPGROUNDS))
+    fc = get_json(
+        client,
+        "/geoserver/wfs?service=WFS&request=GetFeature&typename=sota:Recreation_Camping",
+    )
+    assert fc["totalFeatures"] == 2
+    feat = fc["features"][0]
+    assert feat["geometry"]["coordinates"] == [-119.565, 37.7376]
+    props = feat["properties"]
+    assert props["title"] == "UPPER PINES"
+    assert props["id"] == 232447
+    assert props["rec_gov"] == "https://www.recreation.gov/camping/campgrounds/232447"
+    assert props["sites"] == 3
+    assert props["max_vehicle_len"] == 40
+    assert props["marker-color"] == "#2E7D32"
+    assert props["marker-symbol"] == "camping"  # CalTopo's "Tent" icon
+    assert props["GeoJSON"] == "http://localhost/campground/232447.geojson"
+    # Camping areas (dispersed / informal) get the campfire icon in brown.
+    area = fc["features"][1]["properties"]
+    assert area["kind"] == "Camping area"
+    assert area["marker-symbol"] == "campfire"
+    assert area["marker-color"] == "#A0522D"
+    assert area["GeoJSON"] == "http://localhost/campground/249926.geojson"
+
+
+def test_campground_geojson_download(client, tmp_path):
+    (tmp_path / "data" / "campgrounds.geojson").write_text(json.dumps(FIXTURE_CAMPGROUNDS))
+    resp = client.get("/campground/232447.geojson")
+    assert resp.status_code == 200
+    assert resp.content_type == "application/geo+json"
+    assert 'filename="232447_campground.geojson"' in resp.headers["Content-Disposition"]
+    fc = json.loads(resp.data)
+    assert fc["name"] == "UPPER PINES"
+    feat = fc["features"][0]
+    assert feat["id"] == "Recreation_Camping.1"
+    assert feat["geometry"]["coordinates"] == [-119.565, 37.7376]
+    assert feat["properties"]["title"] == "UPPER PINES"
+    assert feat["properties"]["name"] == "UPPER PINES"
+    assert feat["properties"]["sites"] == 3
+    assert feat["properties"]["GeoJSON"] == "http://localhost/campground/232447.geojson"
+
+    # unknown campground 404s
+    assert client.get("/campground/1.geojson").status_code == 404
 
 
 def test_param_case_insensitivity_and_both_routes(client):

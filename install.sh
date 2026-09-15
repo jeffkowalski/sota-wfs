@@ -19,6 +19,7 @@ DATA="${SOTA_WFS_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/sota-wfs}"
 echo "==> Initial data fetch into $DATA (skipped if data already present)"
 [ -f "$DATA/summitslist.csv" ]      || "$REPO/.venv/bin/python" "$REPO/fetch/fetch_sota.py"
 [ -f "$DATA/superchargers.geojson" ] || "$REPO/.venv/bin/python" "$REPO/fetch/fetch_superchargers.py"
+[ -f "$DATA/campgrounds.geojson" ]   || "$REPO/.venv/bin/python" "$REPO/fetch/fetch_campgrounds.py"
 
 echo "==> Installing systemd user units"
 NGROK_BIN="$(command -v ngrok || echo /usr/local/bin/ngrok)"
@@ -32,7 +33,7 @@ systemctl --user daemon-reload
 
 echo "==> Enabling and starting services"
 systemctl --user enable --now sota-wfs.service ngrok.service
-systemctl --user enable --now fetch-sota.timer fetch-superchargers.timer
+systemctl --user enable --now fetch-sota.timer fetch-superchargers.timer fetch-campgrounds.timer
 
 echo "==> Enabling lingering (services run without an active login session)"
 loginctl enable-linger "$USER"

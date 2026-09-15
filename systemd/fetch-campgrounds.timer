@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly recreation.gov campground refresh
+
+[Timer]
+OnCalendar=Sun *-*-* 05:41
+Persistent=true
+
+[Install]
+WantedBy=timers.target

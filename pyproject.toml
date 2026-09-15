@@ -1,7 +1,7 @@
 [project]
 name = "sota-wfs"
 version = "1.0.0"
-description = "Minimal WFS server for SOTA summits and Tesla Superchargers, for CalTopo ingestion"
+description = "Minimal WFS server for SOTA summits, Tesla Superchargers, and recreation.gov campgrounds, for CalTopo ingestion"
 requires-python = ">=3.10"
 dependencies = [
     "flask>=3.0",

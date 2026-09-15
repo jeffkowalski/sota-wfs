@@ -95,7 +95,7 @@ def _capabilities_110(layers: list[Layer], base_url: str) -> str:
         f' xmlns:sota="{NS_URI}">'
         "<ows:ServiceIdentification>"
         "<ows:Title>SOTA WFS</ows:Title>"
-        "<ows:Abstract>Minimal WFS serving SOTA summits and Tesla Superchargers</ows:Abstract>"
+        "<ows:Abstract>Minimal WFS serving SOTA summits, Tesla Superchargers, and recreation.gov campgrounds</ows:Abstract>"
         "<ows:ServiceType>WFS</ows:ServiceType>"
         "<ows:ServiceTypeVersion>1.1.0</ows:ServiceTypeVersion>"
         "</ows:ServiceIdentification>"
@@ -145,7 +145,7 @@ def _capabilities_200(layers: list[Layer], base_url: str) -> str:
         f' xmlns:sota="{NS_URI}">'
         "<ows:ServiceIdentification>"
         "<ows:Title>SOTA WFS</ows:Title>"
-        "<ows:Abstract>Minimal WFS serving SOTA summits and Tesla Superchargers</ows:Abstract>"
+        "<ows:Abstract>Minimal WFS serving SOTA summits, Tesla Superchargers, and recreation.gov campgrounds</ows:Abstract>"
         "<ows:ServiceType>WFS</ows:ServiceType>"
         "<ows:ServiceTypeVersion>2.0.0</ows:ServiceTypeVersion>"
         "<ows:ServiceTypeVersion>1.1.0</ows:ServiceTypeVersion>"

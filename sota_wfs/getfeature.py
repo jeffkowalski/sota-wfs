@@ -92,68 +92,64 @@ def _supercharger_url(sid, base_url: str) -> str:
     return f"{base_url}/supercharger/{sid}.geojson"
 
 
+def _campground_url(cid, base_url: str) -> str:
+    return f"{base_url}/campground/{cid}.geojson"
+
+
+def _single_feature(data: LayerData, layer_name: str, fid: int, name: str, url: str) -> dict:
+    """Standalone FeatureCollection for one marker point of a layer."""
+    lon = float(np.round(data.lons[fid], COORD_DECIMALS))
+    lat = float(np.round(data.lats[fid], COORD_DECIMALS))
+    rec = data.props.iloc[fid]
+    # Name the object for importers: CalTopo reads properties.title,
+    # GDAL/QGIS read properties.name and the collection-level name.
+    props = {"title": name, "name": name}
+    props.update({k: _json_value(v) for k, v in rec.items()})
+    props["GeoJSON"] = url
+    return {
+        "type": "FeatureCollection",
+        "name": name,
+        "features": [
+            {
+                "type": "Feature",
+                "id": f"{layer_name}.{fid + 1}",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "geometry_name": "the_geom",
+                "properties": props,
+                "bbox": [lon, lat, lon, lat],
+            }
+        ],
+    }
+
+
 def supercharger_geojson(data: LayerData, sid: str, base_url: str) -> dict | None:
-    """Standalone FeatureCollection for one Supercharger's marker point, or
-    None when the station id is unknown."""
+    """One Supercharger's marker point, or None when the station id is unknown."""
     hits = np.flatnonzero(data.props["id"].astype(str) == sid)
     if not hits.size:
         return None
     fid = int(hits[0])
-    lon = float(np.round(data.lons[fid], COORD_DECIMALS))
-    lat = float(np.round(data.lats[fid], COORD_DECIMALS))
-    rec = data.props.iloc[fid]
-    # Name the object for importers: CalTopo reads properties.title,
-    # GDAL/QGIS read properties.name and the collection-level name.
-    name = rec["title"]
-    props = {"title": name, "name": name}
-    props.update({k: _json_value(v) for k, v in rec.items()})
-    props["GeoJSON"] = _supercharger_url(sid, base_url)
-    return {
-        "type": "FeatureCollection",
-        "name": name,
-        "features": [
-            {
-                "type": "Feature",
-                "id": f"Tesla_Superchargers.{fid + 1}",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "geometry_name": "the_geom",
-                "properties": props,
-                "bbox": [lon, lat, lon, lat],
-            }
-        ],
-    }
+    name = data.props.iloc[fid]["title"]
+    return _single_feature(data, "Tesla_Superchargers", fid, name, _supercharger_url(sid, base_url))
+
+
+def campground_geojson(data: LayerData, cid: str, base_url: str) -> dict | None:
+    """One campground's marker point, or None when the facility id is unknown."""
+    hits = np.flatnonzero(data.props["id"].astype(str) == cid)
+    if not hits.size:
+        return None
+    fid = int(hits[0])
+    name = data.props.iloc[fid]["title"]
+    return _single_feature(data, "Recreation_Camping", fid, name, _campground_url(cid, base_url))
 
 
 def summit_geojson(data: LayerData, code: str, base_url: str) -> dict | None:
-    """Standalone FeatureCollection for one summit's marker point, or None
-    when the summit code is unknown."""
+    """One summit's marker point, or None when the summit code is unknown."""
     hits = np.flatnonzero(data.props["SummitCode"] == code)
     if not hits.size:
         return None
     fid = int(hits[0])
-    lon = float(np.round(data.lons[fid], COORD_DECIMALS))
-    lat = float(np.round(data.lats[fid], COORD_DECIMALS))
-    rec = data.props.iloc[fid]
-    # Name the object for importers: CalTopo reads properties.title,
-    # GDAL/QGIS read properties.name and the collection-level name.
-    name = rec["SummitName"]
-    props = {"title": name, "name": name}
-    props.update({k: _json_value(v) for k, v in rec.items()})
-    props["GeoJSON"] = _summit_url(code, base_url)
-    return {
-        "type": "FeatureCollection",
-        "name": name,
-        "features": [
-            {
-                "type": "Feature",
-                "id": f"SOTA_Summits.{fid + 1}",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "geometry_name": "the_geom",
-                "properties": props,
-                "bbox": [lon, lat, lon, lat],
-            }
-        ],
-    }
+    name = data.props.iloc[fid]["SummitName"]
+    return _single_feature(data, "SOTA_Summits", fid, name, _summit_url(code, base_url))
 
 
 def select(
@@ -194,6 +190,8 @@ def select(
             props["GeoJSON"] = _summit_url(rec["SummitCode"], base_url)
         elif layer.name == "Tesla_Superchargers":
             props["GeoJSON"] = _supercharger_url(rec["id"], base_url)
+        elif layer.name == "Recreation_Camping":
+            props["GeoJSON"] = _campground_url(rec["id"], base_url)
         features.append(
             {
                 "type": "Feature",

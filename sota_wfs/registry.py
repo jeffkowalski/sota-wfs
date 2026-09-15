@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .loaders import LayerData, nrel_geojson_loader, sota_csv_loader
+from .loaders import (
+    LayerData,
+    campground_geojson_loader,
+    nrel_geojson_loader,
+    sota_csv_loader,
+)
 
 # Fetched datasets and the AZ ring cache live outside the repo: the
 # workspace tree is synced across devices (Syncthing), and 31k cache files
@@ -56,6 +61,14 @@ LAYERS: dict[str, Layer] = {
             abstract="Tesla Supercharger locations, from the alternative fuel stations API",
             source=DATA_DIR / "superchargers.geojson",
             loader=nrel_geojson_loader,
+        ),
+        Layer(
+            name="Recreation_Camping",
+            ns="sota",
+            title="Recreation.gov Camping",
+            abstract="Campgrounds and camping areas from the recreation.gov RIDB bulk export, one point per place",
+            source=DATA_DIR / "campgrounds.geojson",
+            loader=campground_geojson_loader,
         ),
     ]
 }

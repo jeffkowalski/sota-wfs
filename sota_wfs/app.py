@@ -10,6 +10,7 @@ from . import az
 from .capabilities import capabilities_xml, describe_feature_type_xml, exception_xml
 from .getfeature import (
     WfsError,
+    campground_geojson,
     parse_bbox,
     resolve_properties,
     select,
@@ -156,6 +157,24 @@ def create_app() -> Flask:
             json.dumps(fc, separators=(",", ":")), content_type="application/geo+json"
         )
         resp.headers["Content-Disposition"] = f'attachment; filename="{sid}_supercharger.geojson"'
+        return resp
+
+    @app.route("/campground/<cid>.geojson")
+    def campground_download(cid: str) -> Response:
+        layer = resolve_typename("Recreation_Camping")
+        try:
+            data = get_data(layer)
+        except FileNotFoundError:
+            return Response(
+                "Campground data not yet fetched", status=503, content_type="text/plain"
+            )
+        fc = campground_geojson(data, cid, _base_url())
+        if fc is None:
+            return Response(f"No campground {cid}", status=404, content_type="text/plain")
+        resp = Response(
+            json.dumps(fc, separators=(",", ":")), content_type="application/geo+json"
+        )
+        resp.headers["Content-Disposition"] = f'attachment; filename="{cid}_campground.geojson"'
         return resp
 
     def _describe_feature_type(params: dict[str, str]) -> Response:
